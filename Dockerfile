@@ -1,7 +1,7 @@
 # ---------------------------------------------------------
 # Phase 1: Build dependencies (Native Module Compilation)
 # ---------------------------------------------------------
-FROM node:24-bookworm-slim AS builder
+FROM node:24.22.1-bookworm-slim AS builder
 WORKDIR /app
 ARG TARGETARCH
 
@@ -37,7 +37,7 @@ RUN npm install --omit=dev && npm cache clean --force
 # ---------------------------------------------------------
 # This stage expects frontend/dist and backend/dist 
 # to be pre-built outside the container via CI.
-FROM node:24-bookworm-slim AS runner
+FROM node:24.22.1-bookworm-slim AS runner
 WORKDIR /app
 
 # Install ca-certificates (required by cloudflared for TLS connections)

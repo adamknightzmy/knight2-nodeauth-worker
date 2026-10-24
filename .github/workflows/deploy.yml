@@ -82,7 +82,7 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          wranglerVersion: '4.75.0'
+          wranglerVersion: '4.151.3'
           command: d1 execute ${{ secrets.CLOUDFLARE_D1_DATABASE_NAME || 'nodeauth-db' }} --remote --file=backend/schema.sql
 
       - name: Inject Commit Hash & Platform
@@ -183,7 +183,7 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          wranglerVersion: '4.75.0'
+          wranglerVersion: '4.151.3'
           command: deploy --minify
           secrets: ${{ steps.secret_list.outputs.secrets }}
         env:

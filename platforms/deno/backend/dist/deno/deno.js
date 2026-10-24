@@ -374,10 +374,11 @@ async function getDerivedLicenseKey(masterKey, license) {
   let licenseFeature = "no_license_feature";
   try {
     if (license) {
-      const decoded = atob(license);
+      const clean2 = license.replace(/[^a-zA-Z0-9+/=]/g, "");
+      const decoded = atob(clean2);
       const licenseParts = decoded.split("|");
-      if (licenseParts.length === 3) {
-        licenseFeature = licenseParts[2];
+      if (licenseParts.length >= 3) {
+        licenseFeature = licenseParts[licenseParts.length - 1];
       }
     }
   } catch (e2) {
@@ -6555,9 +6556,9 @@ var init_md = __esm({
       _cloneInto(to) {
         to || (to = new this.constructor());
         to.set(...this.get());
-        const { blockLen, buffer: buffer2, length, finished, destroyed, pos } = this;
+        const { blockLen, buffer: buffer2, length, finished: finished3, destroyed, pos } = this;
         to.destroyed = destroyed;
-        to.finished = finished;
+        to.finished = finished3;
         to.length = length;
         to.pos = pos;
         if (length % blockLen)
@@ -6995,9 +6996,9 @@ var init_hmac = __esm({
       }
       _cloneInto(to) {
         to || (to = Object.create(Object.getPrototypeOf(this), {}));
-        const { oHash, iHash, finished, destroyed, blockLen, outputLen } = this;
+        const { oHash, iHash, finished: finished3, destroyed, blockLen, outputLen } = this;
         to = to;
-        to.finished = finished;
+        to.finished = finished3;
         to.destroyed = destroyed;
         to.blockLen = blockLen;
         to.outputLen = outputLen;
@@ -11899,6 +11900,17 @@ var init_punycode = __esm({
 // node_modules/nodemailer/dist/esm/shared/url.js
 import net from "node:net";
 import urllib from "node:url";
+function stripSurroundingWhitespace(input) {
+  let start = 0;
+  let end = input.length;
+  while (start < end && input.charCodeAt(start) <= 32) {
+    start++;
+  }
+  while (end > start && input.charCodeAt(end - 1) <= 32) {
+    end--;
+  }
+  return input.slice(start, end);
+}
 function invalidUrl(input) {
   const err = new TypeError("Invalid URL");
   err.code = "ERR_INVALID_URL";
@@ -11947,18 +11959,17 @@ function normalizeHostname(raw2, href) {
   }
   return mapped;
 }
-var SLASHLESS_AUTHORITY, SURROUNDING_WHITESPACE, LEGACY_TRIM, AUTHORITY, FORBIDDEN_HOST_CHARS, CONTROL_CHARS, parse2, resolve;
+var SLASHLESS_AUTHORITY, LEGACY_TRIM, AUTHORITY, FORBIDDEN_HOST_CHARS, CONTROL_CHARS, parse2, resolve;
 var init_url = __esm({
   "node_modules/nodemailer/dist/esm/shared/url.js"() {
     init_punycode();
     SLASHLESS_AUTHORITY = /^([a-zA-Z][a-zA-Z0-9+.-]*:)(?!\/\/)([\s\S]+)$/;
-    SURROUNDING_WHITESPACE = /^[\x00-\x20]+|[\x00-\x20]+$/g;
     LEGACY_TRIM = /^[\x00-\x20\u00a0\ufeff]+/;
     AUTHORITY = /^([a-zA-Z0-9+.-]+:)?[\\/]{2}([^\\/?#]*)/;
     FORBIDDEN_HOST_CHARS = /[\x00-\x20#/:<>?@[\\\]^|\x7f]/;
     CONTROL_CHARS = /[\x00-\x1f\x7f]/;
     parse2 = (input, parseQueryString) => {
-      input = (input || "").replace(SURROUNDING_WHITESPACE, "");
+      input = stripSurroundingWhitespace(input || "");
       const slashless = SLASHLESS_AUTHORITY.exec(input);
       const normalized2 = slashless ? slashless[1] + "//" + slashless[2] : input;
       let u2;
@@ -12248,16 +12259,21 @@ var name, version5, homepage;
 var init_package_info = __esm({
   "node_modules/nodemailer/dist/esm/package-info.js"() {
     name = "nodemailer";
-    version5 = "10.0.16";
+    version5 = "10.2.1";
     homepage = "https://nodemailer.com/";
   }
 });
 
 // node_modules/nodemailer/dist/esm/errors.js
-var ECONNECTION, ENOAUTH, EOAUTH2, EMAXLIMIT, EMAXRECIPIENTS, ESENDMAIL, ESES, ECONFIG, EPROXY, EFILEACCESS, EURLACCESS, EFETCH;
+var ECONNECTION, ETIMEDOUT, ESOCKET, EENVELOPE, EMESSAGE, ESTREAM, ENOAUTH, EOAUTH2, EMAXLIMIT, EMAXRECIPIENTS, ESENDMAIL, ESES, ECONFIG, EPROXY, EFILEACCESS, EURLACCESS, EFETCH, isTransientError, isPermanentResponseCode, ERR_ACCESS_DENIED;
 var init_errors3 = __esm({
   "node_modules/nodemailer/dist/esm/errors.js"() {
     ECONNECTION = "ECONNECTION";
+    ETIMEDOUT = "ETIMEDOUT";
+    ESOCKET = "ESOCKET";
+    EENVELOPE = "EENVELOPE";
+    EMESSAGE = "EMESSAGE";
+    ESTREAM = "ESTREAM";
     ENOAUTH = "ENOAUTH";
     EOAUTH2 = "EOAUTH2";
     EMAXLIMIT = "EMAXLIMIT";
@@ -12269,6 +12285,9 @@ var init_errors3 = __esm({
     EFILEACCESS = "EFILEACCESS";
     EURLACCESS = "EURLACCESS";
     EFETCH = "EFETCH";
+    isTransientError = (err) => err.responseCode === 421 || err.code === ECONNECTION || err.code === ESOCKET || err.code === ETIMEDOUT;
+    isPermanentResponseCode = (responseCode) => responseCode >= 500 && responseCode < 600 && responseCode !== 503;
+    ERR_ACCESS_DENIED = "ERR_ACCESS_DENIED";
   }
 });
 
@@ -12295,6 +12314,11 @@ import https from "node:https";
 import zlib from "node:zlib";
 import { PassThrough } from "node:stream";
 import net3 from "node:net";
+function setFetchCode(err) {
+  if (err.code !== ERR_ACCESS_DENIED) {
+    err.code = EFETCH;
+  }
+}
 function parseFetchUrl(url) {
   let parsed;
   try {
@@ -12307,12 +12331,19 @@ function parseFetchUrl(url) {
   }
   return parsed;
 }
+function fetchPort(parsed) {
+  return parsed.port ? Number(parsed.port) : parsed.protocol === "https:" ? 443 : 80;
+}
 function nmfetch(url, options) {
   options = options || {};
   options.fetchRes = options.fetchRes || new PassThrough();
   options.cookies = options.cookies || new cookies_default();
   options.redirects = options.redirects || 0;
   options.maxRedirects = isNaN(options.maxRedirects) ? MAX_REDIRECTS : options.maxRedirects;
+  if (!options.deadline) {
+    options.maxTime = typeof options.maxTime === "number" && options.maxTime >= 0 ? options.maxTime : DEFAULT_MAX_TIME;
+    options.deadline = options.maxTime ? Date.now() + options.maxTime : 0;
+  }
   const fetchRes = options.fetchRes;
   const parsed = parseFetchUrl(url);
   if (!parsed) {
@@ -12335,7 +12366,7 @@ function nmfetch(url, options) {
     options.cookie = false;
   }
   let method = (options.method || "").toString().trim().toUpperCase() || "GET";
-  let finished = false;
+  let finished3 = false;
   let cookies;
   let body;
   const handler = parsed.protocol === "https:" ? https : http2;
@@ -12366,11 +12397,11 @@ function nmfetch(url, options) {
       headers["Transfer-Encoding"] = "chunked";
       body = options.body;
       body.on("error", (err) => {
-        if (finished) {
+        if (finished3) {
           return;
         }
-        finished = true;
-        err.code = EFETCH;
+        finished3 = true;
+        setFetchCode(err);
         err.sourceUrl = url;
         fetchRes.emit("error", err);
       });
@@ -12384,7 +12415,7 @@ function nmfetch(url, options) {
             return encodeURIComponent(key) + "=" + encodeURIComponent(value);
           }).join("&"));
         } catch (E2) {
-          finished = true;
+          finished3 = true;
           E2.code = EFETCH;
           E2.sourceUrl = url;
           setImmediate(() => fetchRes.emit("error", E2));
@@ -12403,7 +12434,7 @@ function nmfetch(url, options) {
     method,
     host: parsed.hostname,
     path: parsed.path,
-    port: parsed.port ? parsed.port : parsed.protocol === "https:" ? 443 : 80,
+    port: fetchPort(parsed),
     headers,
     // Validate TLS certificates by default. Callers that genuinely need to
     // reach a self-signed/internal host opt out explicitly with
@@ -12424,20 +12455,28 @@ function nmfetch(url, options) {
   try {
     req = handler.request(reqOptions);
   } catch (E2) {
-    finished = true;
+    finished3 = true;
     setImmediate(() => {
-      E2.code = EFETCH;
+      setFetchCode(E2);
       E2.sourceUrl = url;
       fetchRes.emit("error", E2);
     });
     return fetchRes;
   }
+  let deadlineTimer;
+  const clearDeadline = () => {
+    if (deadlineTimer) {
+      clearTimeout(deadlineTimer);
+      deadlineTimer = void 0;
+    }
+  };
   const fail = (err, sourceUrl = url) => {
-    if (finished) {
+    if (finished3) {
       return;
     }
-    finished = true;
-    err.code = EFETCH;
+    finished3 = true;
+    clearDeadline();
+    setFetchCode(err);
     err.sourceUrl = sourceUrl;
     fetchRes.emit("error", err);
     req.abort();
@@ -12446,10 +12485,22 @@ function nmfetch(url, options) {
   if (timeout) {
     req.setTimeout(timeout, () => fail(new Error("Request Timeout")));
   }
+  if (options.deadline) {
+    deadlineTimer = setTimeout(() => fail(new Error("Request exceeded the allowed " + options.maxTime + " ms")), Math.max(options.deadline - Date.now(), 1));
+    deadlineTimer.unref();
+  }
   req.on("error", (err) => fail(err));
+  fetchRes.once("close", () => {
+    clearDeadline();
+    if (finished3 || fetchRes.readableEnded) {
+      return;
+    }
+    finished3 = true;
+    req.destroy();
+  });
   req.on("response", (res) => {
     let inflate;
-    if (finished) {
+    if (finished3) {
       return;
     }
     switch (res.headers["content-encoding"]) {
@@ -12480,17 +12531,17 @@ function nmfetch(url, options) {
       if (!redirectParsed) {
         return fail(new Error("Unsupported protocol for URL " + redirectUrl), redirectUrl);
       }
-      const crossHost = redirectParsed.hostname !== parsed.hostname;
-      const downgrade = parsed.protocol === "https:" && redirectParsed.protocol === "http:";
-      if (options.headers && (crossHost || downgrade)) {
+      const crossOrigin = redirectParsed.protocol !== parsed.protocol || redirectParsed.hostname !== parsed.hostname || fetchPort(redirectParsed) !== fetchPort(parsed);
+      if (options.headers && crossOrigin) {
         const sensitive = ["authorization", "cookie", "proxy-authorization"];
         Object.keys(options.headers).forEach((key) => {
-          if (sensitive.includes(key.toLowerCase())) {
+          if (sensitive.includes(key.toLowerCase().trim())) {
             delete options.headers[key];
           }
         });
       }
-      finished = true;
+      finished3 = true;
+      clearDeadline();
       res.resume();
       req.abort();
       return nmfetch(redirectUrl, options);
@@ -12501,12 +12552,13 @@ function nmfetch(url, options) {
       return fail(new Error("Invalid status code " + res.statusCode));
     }
     res.on("error", (err) => fail(err));
+    res.once("end", () => clearDeadline());
     const maxBytes = typeof options.maxBytes === "number" && options.maxBytes > 0 ? options.maxBytes : DEFAULT_MAX_BYTES;
     const source = inflate || res;
     let received = 0;
     source.on("data", (chunk) => {
       received += chunk.length;
-      if (received <= maxBytes || finished) {
+      if (received <= maxBytes || finished3) {
         return;
       }
       source.unpipe(fetchRes);
@@ -12534,7 +12586,7 @@ function nmfetch(url, options) {
   });
   return fetchRes;
 }
-var MAX_REDIRECTS, DEFAULT_TIMEOUT, DEFAULT_MAX_BYTES, TLS_OPTION_KEYS, fetch_default;
+var MAX_REDIRECTS, DEFAULT_TIMEOUT, DEFAULT_MAX_TIME, DEFAULT_MAX_BYTES, TLS_OPTION_KEYS, fetch_default;
 var init_fetch = __esm({
   "node_modules/nodemailer/dist/esm/fetch/index.js"() {
     init_url();
@@ -12544,6 +12596,7 @@ var init_fetch = __esm({
     init_objects();
     MAX_REDIRECTS = 5;
     DEFAULT_TIMEOUT = 60 * 1e3;
+    DEFAULT_MAX_TIME = 2 * 60 * 1e3;
     DEFAULT_MAX_BYTES = 64 * 1024 * 1024;
     TLS_OPTION_KEYS = [
       "ALPNProtocols",
@@ -12570,6 +12623,7 @@ var init_fetch = __esm({
     ];
     nmfetch.Cookies = cookies_default;
     nmfetch.DEFAULT_TIMEOUT = DEFAULT_TIMEOUT;
+    nmfetch.DEFAULT_MAX_TIME = DEFAULT_MAX_TIME;
     fetch_default = nmfetch;
   }
 });
@@ -12580,6 +12634,7 @@ import fs from "node:fs";
 import dns from "node:dns";
 import net4 from "node:net";
 import os from "node:os";
+import { finished } from "node:stream";
 function resolveContent(data, key, options, callback) {
   if (!callback && typeof options === "function") {
     callback = options;
@@ -12645,36 +12700,66 @@ function resolveContentValue(data, key, options, callback) {
   }
   setImmediate(() => callback(null, content));
 }
+function recordStreamErrors(stream) {
+  stream.on("error", (err) => {
+    if (!streamErrors.has(stream)) {
+      streamErrors.set(stream, err);
+    }
+  });
+}
+function destroyStream(value) {
+  const stream = value;
+  if (stream && typeof stream.pipe === "function" && typeof stream.destroy === "function" && !stream.destroyed) {
+    stream.destroy();
+  }
+}
+function unreadableStreamError(stream) {
+  const err = streamErrors.get(stream) || stream.errored;
+  if (err) {
+    return err;
+  }
+  if (stream.readableEnded || stream.destroyed) {
+    const unreadable = new Error("Content stream was already read or destroyed");
+    unreadable.code = ESTREAM;
+    return unreadable;
+  }
+  return null;
+}
 function resolveStream(stream, callback) {
   let responded = false;
+  const respond = (err, value) => {
+    if (responded) {
+      return;
+    }
+    responded = true;
+    callback(err, value);
+  };
+  const unreadable = unreadableStreamError(stream);
+  if (unreadable) {
+    stream.on("error", () => false);
+    setImmediate(() => respond(unreadable));
+    return;
+  }
   const chunks = [];
   let chunklen = 0;
-  stream.on("error", (err) => {
-    if (responded) {
-      return;
+  stream.on("data", (chunk) => {
+    if (typeof chunk === "string") {
+      chunk = Buffer.from(chunk);
     }
-    responded = true;
-    callback(err);
+    chunks.push(chunk);
+    chunklen += chunk.length;
   });
-  stream.on("readable", () => {
-    let chunk;
-    while ((chunk = stream.read()) !== null) {
-      chunks.push(chunk);
-      chunklen += chunk.length;
+  finished(stream, { writable: false }, (err) => {
+    if (err) {
+      return respond(err);
     }
-  });
-  stream.on("end", () => {
-    if (responded) {
-      return;
-    }
-    responded = true;
     let value;
     try {
       value = Buffer.concat(chunks, chunklen);
     } catch (E2) {
-      return callback(E2);
+      return respond(E2);
     }
-    callback(null, value);
+    respond(null, value);
   });
 }
 function createDefaultLogger(levels) {
@@ -12713,7 +12798,7 @@ function createDefaultLogger(levels) {
   });
   return logger3;
 }
-var DNS_TTL, CACHE_CLEANUP_INTERVAL, MAX_CACHE_SIZE, lastCacheCleanup, networkInterfaces, isFamilySupported, resolve2, dnsCache, formatDNSValue, resolveHostname, parseConnectionUrl, _logFunc, getLogger2, callbackPromise, parseDataURI, assign, encodeXText;
+var DNS_TTL, CACHE_CLEANUP_INTERVAL, MAX_CACHE_SIZE, lastCacheCleanup, networkInterfaces, networkInterfacesRead, _readNetworkInterfaces, isFamilySupported, resolve2, dnsCache, formatDNSValue, resolveHostname, parseConnectionUrl, _logFunc, getLogger2, callbackPromise, parseDataURI, assign, encodeXText, streamErrors;
 var init_shared = __esm({
   "node_modules/nodemailer/dist/esm/shared/index.js"() {
     init_url();
@@ -12724,12 +12809,19 @@ var init_shared = __esm({
     CACHE_CLEANUP_INTERVAL = 30 * 1e3;
     MAX_CACHE_SIZE = 1e3;
     lastCacheCleanup = 0;
-    try {
-      networkInterfaces = os.networkInterfaces();
-    } catch (_err) {
-    }
+    networkInterfacesRead = false;
+    _readNetworkInterfaces = () => {
+      if (!networkInterfacesRead) {
+        networkInterfacesRead = true;
+        try {
+          networkInterfaces = os.networkInterfaces();
+        } catch (_err) {
+        }
+      }
+      return networkInterfaces;
+    };
     isFamilySupported = (family, allowInternal) => {
-      const addresses = Object.values(networkInterfaces || {}).flat();
+      const addresses = Object.values(_readNetworkInterfaces() || {}).flat();
       if (!addresses.length) {
         return true;
       }
@@ -12738,7 +12830,8 @@ var init_shared = __esm({
     resolve2 = (family, hostname, options, callback) => {
       options = options || {};
       if (!isFamilySupported(family, options.allowInternalNetworkInterfaces)) {
-        return callback(null, []);
+        callback(null, []);
+        return null;
       }
       const dnsResolver = dns.Resolver ? new dns.Resolver(options) : dns;
       dnsResolver["resolve" + family](hostname, (err, addresses) => {
@@ -12757,6 +12850,7 @@ var init_shared = __esm({
         }
         return callback(null, Array.isArray(addresses) ? addresses : [].concat(addresses || []));
       });
+      return dns.Resolver ? dnsResolver : null;
     };
     dnsCache = /* @__PURE__ */ new Map();
     formatDNSValue = (value, extra) => {
@@ -12811,103 +12905,125 @@ var init_shared = __esm({
           }));
         }
       }
+      let responded = false;
+      let deadline;
+      const respond = (err, result) => {
+        if (responded) {
+          return;
+        }
+        responded = true;
+        clearTimeout(deadline);
+        callback(err, result);
+      };
+      const respondCached = (error2) => {
+        if (!cached) {
+          return false;
+        }
+        dnsCache.set(host, {
+          value: cached.value,
+          expires: Date.now() + (options.dnsTtl || DNS_TTL)
+        });
+        respond(null, formatDNSValue(cached.value, {
+          servername,
+          cached: true,
+          error: error2
+        }));
+        return true;
+      };
+      const resolvers = [];
+      const timeout = Number(options.timeout) || 0;
+      if (timeout > 0) {
+        deadline = setTimeout(() => {
+          for (const resolver of resolvers) {
+            if (typeof resolver.cancel === "function") {
+              resolver.cancel();
+            }
+          }
+          const err = new Error("DNS lookup for " + host + " timed out");
+          err.code = dns.TIMEOUT;
+          if (!respondCached(err)) {
+            respond(err);
+          }
+        }, timeout);
+      }
       let ipv4Addresses = [];
       let ipv6Addresses = [];
       let ipv4Error = null;
       let ipv6Error = null;
-      resolve2(4, options.host, options, (err, addresses) => {
-        if (err) {
-          ipv4Error = err;
-        } else {
-          ipv4Addresses = addresses || [];
+      let pending = 2;
+      const onResolved = () => {
+        if (--pending || responded) {
+          return;
         }
-        resolve2(6, host, options, (err2, addresses2) => {
-          if (err2) {
-            ipv6Error = err2;
-          } else {
-            ipv6Addresses = addresses2 || [];
-          }
-          const allAddresses = ipv4Addresses.concat(ipv6Addresses);
-          if (allAddresses.length) {
+        const allAddresses = ipv4Addresses.concat(ipv6Addresses);
+        if (allAddresses.length) {
+          const value = {
+            addresses: allAddresses
+          };
+          dnsCache.set(host, {
+            value,
+            expires: Date.now() + (options.dnsTtl || DNS_TTL)
+          });
+          return respond(null, formatDNSValue(value, {
+            servername,
+            cached: false
+          }));
+        }
+        if (ipv4Error && ipv6Error && respondCached(ipv4Error)) {
+          return;
+        }
+        try {
+          dns.lookup(host, { all: true }, (err, addresses) => {
+            if (err) {
+              if (respondCached(err)) {
+                return;
+              }
+              return respond(err);
+            }
+            const supportedAddresses = addresses ? addresses.filter((addr) => isFamilySupported(addr.family)).map((addr) => addr.address) : [];
+            if (addresses && addresses.length && !supportedAddresses.length) {
+              console.warn(`Failed to resolve IPv${addresses[0].family} addresses with current network`);
+            }
+            if (!supportedAddresses.length && cached) {
+              return respond(null, formatDNSValue(cached.value, {
+                servername,
+                cached: true
+              }));
+            }
             const value = {
-              addresses: allAddresses
+              addresses: supportedAddresses.length ? supportedAddresses : [host]
             };
             dnsCache.set(host, {
               value,
               expires: Date.now() + (options.dnsTtl || DNS_TTL)
             });
-            return callback(null, formatDNSValue(value, {
+            return respond(null, formatDNSValue(value, {
               servername,
               cached: false
             }));
+          });
+        } catch (lookupErr) {
+          if (respondCached(lookupErr)) {
+            return;
           }
-          if (ipv4Error && ipv6Error) {
-            if (cached) {
-              dnsCache.set(host, {
-                value: cached.value,
-                expires: Date.now() + (options.dnsTtl || DNS_TTL)
-              });
-              return callback(null, formatDNSValue(cached.value, {
-                servername,
-                cached: true,
-                error: ipv4Error
-              }));
-            }
+          return respond(ipv4Error || ipv6Error || lookupErr);
+        }
+      };
+      for (const family of [4, 6]) {
+        const resolver = resolve2(family, host, options, (err, addresses) => {
+          if (family === 4) {
+            ipv4Error = err;
+            ipv4Addresses = addresses || [];
+          } else {
+            ipv6Error = err;
+            ipv6Addresses = addresses || [];
           }
-          try {
-            dns.lookup(host, { all: true }, (err3, addresses3) => {
-              if (err3) {
-                if (cached) {
-                  dnsCache.set(host, {
-                    value: cached.value,
-                    expires: Date.now() + (options.dnsTtl || DNS_TTL)
-                  });
-                  return callback(null, formatDNSValue(cached.value, {
-                    servername,
-                    cached: true,
-                    error: err3
-                  }));
-                }
-                return callback(err3);
-              }
-              const supportedAddresses = addresses3 ? addresses3.filter((addr) => isFamilySupported(addr.family)).map((addr) => addr.address) : [];
-              if (addresses3 && addresses3.length && !supportedAddresses.length) {
-                console.warn(`Failed to resolve IPv${addresses3[0].family} addresses with current network`);
-              }
-              if (!supportedAddresses.length && cached) {
-                return callback(null, formatDNSValue(cached.value, {
-                  servername,
-                  cached: true
-                }));
-              }
-              const value = {
-                addresses: supportedAddresses.length ? supportedAddresses : [host]
-              };
-              dnsCache.set(host, {
-                value,
-                expires: Date.now() + (options.dnsTtl || DNS_TTL)
-              });
-              return callback(null, formatDNSValue(value, {
-                servername,
-                cached: false
-              }));
-            });
-          } catch (lookupErr) {
-            if (cached) {
-              dnsCache.set(host, {
-                value: cached.value,
-                expires: Date.now() + (options.dnsTtl || DNS_TTL)
-              });
-              return callback(null, formatDNSValue(cached.value, {
-                servername,
-                cached: true,
-                error: lookupErr
-              }));
-            }
-            return callback(ipv4Error || ipv6Error || lookupErr);
-          }
+          onResolved();
         });
-      });
+        if (resolver) {
+          resolvers.push(resolver);
+        }
+      }
     };
     parseConnectionUrl = (str) => {
       str = str || "";
@@ -13092,6 +13208,7 @@ var init_shared = __esm({
       }
       return result;
     };
+    streamErrors = /* @__PURE__ */ new WeakMap();
   }
 });
 
@@ -14230,10 +14347,7 @@ var init_mime_types = __esm({
       ["bdm", "application/vnd.syncml.dm+wbxml"],
       ["bed", "application/vnd.realvnc.bed"],
       ["bh2", "application/vnd.fujitsu.oasysprs"],
-      [
-        "bin",
-        ["application/octet-stream", "application/mac-binary", "application/macbinary", "application/x-macbinary", "application/x-binary"]
-      ],
+      ["bin", ["application/octet-stream", "application/mac-binary", "application/macbinary", "application/x-macbinary", "application/x-binary"]],
       ["bm", "image/bmp"],
       ["bmi", "application/vnd.bmi"],
       ["bmp", ["image/bmp", "image/x-windows-bmp"]],
@@ -14278,10 +14392,7 @@ var init_mime_types = __esm({
       ["cii", "application/vnd.anser-web-certificate-issue-initiation"],
       ["cil", "application/vnd.ms-artgalry"],
       ["cla", "application/vnd.claymore"],
-      [
-        "class",
-        ["application/octet-stream", "application/java", "application/java-byte-code", "application/java-vm", "application/x-java-class"]
-      ],
+      ["class", ["application/octet-stream", "application/java", "application/java-byte-code", "application/java-vm", "application/x-java-class"]],
       ["clkk", "application/vnd.crick.clicker.keyboard"],
       ["clkp", "application/vnd.crick.clicker.palette"],
       ["clkt", "application/vnd.crick.clicker.template"],
@@ -14886,10 +14997,7 @@ var init_mime_types = __esm({
       ["sbml", "application/sbml+xml"],
       ["sc", "application/vnd.ibm.secure-container"],
       ["scd", "application/x-msschedule"],
-      [
-        "scm",
-        ["application/vnd.lotus-screencam", "video/x-scm", "text/x-script.guile", "application/x-lotusscreencam", "text/x-script.scheme"]
-      ],
+      ["scm", ["application/vnd.lotus-screencam", "video/x-scm", "text/x-script.guile", "application/x-lotusscreencam", "text/x-script.scheme"]],
       ["scq", "application/scvp-cv-request"],
       ["scs", "application/scvp-cv-response"],
       ["sct", "text/scriptlet"],
@@ -15198,12 +15306,6 @@ var init_mime_types = __esm({
 });
 
 // node_modules/nodemailer/dist/esm/base64/index.js
-var base64_exports = {};
-__export(base64_exports, {
-  Encoder: () => Encoder,
-  encode: () => encode6,
-  wrap: () => wrap3
-});
 import { Transform } from "node:stream";
 function encode6(buffer2) {
   if (typeof buffer2 === "string") {
@@ -15211,22 +15313,30 @@ function encode6(buffer2) {
   }
   return buffer2.toString("base64");
 }
-function wrap3(str, lineLength) {
-  str = (str || "").toString();
-  lineLength = Math.max(Number(lineLength) || 76, 1);
-  if (str.length <= lineLength) {
-    return str;
+function normalizeLineLength(lineLength) {
+  const length = Math.floor(Number(lineLength));
+  return Number.isFinite(length) && length >= 1 ? length : 76;
+}
+function wrapBuffer(src, lineLength, final) {
+  const lines = Math.ceil(src.length / lineLength);
+  const complete = Math.max(lines - 1, 0);
+  let rest = src.length - complete * lineLength;
+  const output = Buffer.allocUnsafe(complete * (lineLength + 2) + (final ? rest : 0));
+  let to = 0;
+  for (let from14 = 0; from14 < complete * lineLength; from14 += lineLength) {
+    src.copy(output, to, from14, from14 + lineLength);
+    to += lineLength;
+    output[to++] = 13;
+    output[to++] = 10;
   }
-  const result = [];
-  let pos = 0;
-  const chunkLength = lineLength * 1024;
-  const wrapRegex = new RegExp(".{" + lineLength + "}", "g");
-  while (pos < str.length) {
-    const wrappedLines = str.substr(pos, chunkLength).replace(wrapRegex, "$&\r\n").trim();
-    result.push(wrappedLines);
-    pos += chunkLength;
+  if (final) {
+    to += src.copy(output, to, complete * lineLength);
+    rest = 0;
   }
-  return result.join("\r\n").trim();
+  if (to !== output.length) {
+    throw new Error("Unexpected wrapped length");
+  }
+  return { output, rest };
 }
 var Encoder;
 var init_base64 = __esm({
@@ -15236,62 +15346,60 @@ var init_base64 = __esm({
         super();
         this.options = options || {};
         if (this.options.lineLength !== false) {
-          this.options.lineLength = this.options.lineLength || 76;
+          this.options.lineLength = normalizeLineLength(this.options.lineLength);
         }
         this._curLine = "";
         this._remainingBytes = false;
         this.inputBytes = 0;
         this.outputBytes = 0;
       }
+      /**
+       * Emits the encoded characters `b64` that follow the current line, keeping what can not be
+       * emitted yet as the new current line
+       *
+       * @internal
+       */
+      _emit(b64, final) {
+        const src = Buffer.from(this._curLine + b64, "latin1");
+        if (!src.length) {
+          return;
+        }
+        let output = src;
+        if (this.options.lineLength) {
+          const wrapped = wrapBuffer(src, this.options.lineLength, final);
+          output = wrapped.output;
+          this._curLine = wrapped.rest ? src.toString("latin1", src.length - wrapped.rest) : "";
+        } else {
+          this._curLine = "";
+        }
+        if (output.length) {
+          this.outputBytes += output.length;
+          this.push(output);
+        }
+      }
       /** @internal */
       _transform(chunk, encoding, done) {
         let buf = encoding !== "buffer" ? Buffer.from(chunk, encoding) : chunk;
         if (!buf || !buf.length) {
-          setImmediate(done);
-          return;
+          return done();
         }
         this.inputBytes += buf.length;
-        if (this._remainingBytes && this._remainingBytes.length) {
+        if (this._remainingBytes) {
           buf = Buffer.concat([this._remainingBytes, buf], this._remainingBytes.length + buf.length);
           this._remainingBytes = false;
         }
-        if (buf.length % 3) {
-          this._remainingBytes = buf.slice(buf.length - buf.length % 3);
-          buf = buf.slice(0, buf.length - buf.length % 3);
-        } else {
-          this._remainingBytes = false;
+        const extra = buf.length % 3;
+        if (extra) {
+          this._remainingBytes = buf.subarray(buf.length - extra);
+          buf = buf.subarray(0, buf.length - extra);
         }
-        let b64 = this._curLine + encode6(buf);
-        if (this.options.lineLength) {
-          b64 = wrap3(b64, this.options.lineLength);
-          const lastLF = b64.lastIndexOf("\n");
-          if (lastLF < 0) {
-            this._curLine = b64;
-            b64 = "";
-          } else if (lastLF === b64.length - 1) {
-            this._curLine = "";
-          } else {
-            this._curLine = b64.substring(lastLF + 1);
-            b64 = b64.substring(0, lastLF + 1);
-          }
-        }
-        if (b64) {
-          this.outputBytes += b64.length;
-          this.push(Buffer.from(b64, "ascii"));
-        }
-        setImmediate(done);
+        this._emit(encode6(buf), false);
+        done();
       }
       /** @internal */
       _flush(done) {
-        if (this._remainingBytes && this._remainingBytes.length) {
-          this._curLine += encode6(this._remainingBytes);
-        }
-        if (this._curLine) {
-          this._curLine = wrap3(this._curLine, this.options.lineLength);
-          this.outputBytes += this._curLine.length;
-          this.push(Buffer.from(this._curLine, "ascii"));
-          this._curLine = "";
-        }
+        this._emit(this._remainingBytes ? encode6(this._remainingBytes) : "", true);
+        this._remainingBytes = false;
         done();
       }
     };
@@ -15299,30 +15407,29 @@ var init_base64 = __esm({
 });
 
 // node_modules/nodemailer/dist/esm/qp/index.js
-var qp_exports = {};
-__export(qp_exports, {
-  Encoder: () => Encoder2,
-  encode: () => encode7,
-  wrap: () => wrap4
-});
 import { Transform as Transform2 } from "node:stream";
 function encode7(buffer2) {
-  if (typeof buffer2 === "string") {
-    buffer2 = Buffer.from(buffer2, "utf-8");
-  }
-  let result = "";
-  let ord;
-  for (let i2 = 0, len = buffer2.length; i2 < len; i2++) {
-    ord = buffer2[i2];
-    if (checkRanges(ord, QP_RANGES) && !((ord === 32 || ord === 9) && (i2 === len - 1 || buffer2[i2 + 1] === 10 || buffer2[i2 + 1] === 13))) {
-      result += String.fromCharCode(ord);
+  return encodeBytes4(typeof buffer2 === "string" ? Buffer.from(buffer2, "utf-8") : buffer2);
+}
+function encodeBytes4(buffer2, next, binary2, previous) {
+  const len = buffer2.length;
+  const output = Buffer.allocUnsafe(len * 3);
+  let pos = 0;
+  for (let i2 = 0; i2 < len; i2++) {
+    const ord = buffer2[i2];
+    const following = i2 + 1 < len ? buffer2[i2 + 1] : next;
+    const lineBreakByte = binary2 && (ord === 13 || ord === 10) ? ord === 13 ? following === 10 : (i2 > 0 ? buffer2[i2 - 1] : previous) === 13 : true;
+    if (QP_LITERAL[ord] && lineBreakByte && !(isWhitespace(ord) && (following === void 0 || following === 10 || following === 13))) {
+      output[pos++] = ord;
       continue;
     }
-    result += "=" + (ord < 16 ? "0" : "") + ord.toString(16).toUpperCase();
+    output[pos++] = 61;
+    output[pos++] = HEX_DIGITS[Math.floor(ord / 16)];
+    output[pos++] = HEX_DIGITS[ord % 16];
   }
-  return result;
+  return output.toString("latin1", 0, pos);
 }
-function wrap4(str, lineLength) {
+function wrap3(str, lineLength) {
   str = (str || "").toString();
   lineLength = Math.max(Number(lineLength) || 76, MIN_LINE_LENGTH);
   if (str.length <= lineLength) {
@@ -15402,7 +15509,7 @@ function checkRanges(nr2, ranges) {
   }
   return false;
 }
-var MIN_LINE_LENGTH, QP_RANGES, Encoder2;
+var MIN_LINE_LENGTH, QP_RANGES, QP_LITERAL, HEX_DIGITS, isWhitespace, ENCODE_SLICE_SIZE, Encoder2;
 var init_qp = __esm({
   "node_modules/nodemailer/dist/esm/qp/index.js"() {
     MIN_LINE_LENGTH = 4;
@@ -15418,6 +15525,13 @@ var init_qp = __esm({
       [62, 126]
       // >?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\]^_`abcdefghijklmnopqrstuvwxyz{|}
     ];
+    QP_LITERAL = new Uint8Array(256);
+    for (let i2 = 0; i2 < 256; i2++) {
+      QP_LITERAL[i2] = checkRanges(i2, QP_RANGES) ? 1 : 0;
+    }
+    HEX_DIGITS = Buffer.from("0123456789ABCDEF", "latin1");
+    isWhitespace = (c2) => c2 === 32 || c2 === 9;
+    ENCODE_SLICE_SIZE = 64 * 1024;
     Encoder2 = class extends Transform2 {
       constructor(options) {
         super();
@@ -15426,44 +15540,76 @@ var init_qp = __esm({
           this.options.lineLength = this.options.lineLength || 76;
         }
         this._curLine = "";
+        this._remainingBytes = false;
+        this._lastByte = void 0;
         this.inputBytes = 0;
         this.outputBytes = 0;
       }
       /** @internal */
       _transform(chunk, encoding, done) {
-        let qp;
-        if (encoding !== "buffer") {
-          chunk = Buffer.from(chunk, encoding);
-        }
-        if (!chunk || !chunk.length) {
+        let buf = encoding !== "buffer" ? Buffer.from(chunk, encoding) : chunk;
+        if (!buf || !buf.length) {
           return done();
         }
-        this.inputBytes += chunk.length;
-        if (this.options.lineLength) {
-          qp = this._curLine + encode7(chunk);
-          qp = wrap4(qp, this.options.lineLength);
-          qp = qp.replace(/(^|\n)([^\n]*)$/, (match2, lineBreak, lastLine) => {
-            this._curLine = lastLine;
-            return lineBreak;
-          });
-          if (qp) {
-            this.outputBytes += qp.length;
-            this.push(qp);
-          }
-        } else {
-          qp = encode7(chunk);
-          this.outputBytes += qp.length;
-          this.push(qp, "ascii");
+        this.inputBytes += buf.length;
+        if (this._remainingBytes) {
+          buf = Buffer.concat([this._remainingBytes, buf], this._remainingBytes.length + buf.length);
+          this._remainingBytes = false;
         }
+        let end = buf.length;
+        while (end > 0 && (isWhitespace(buf[end - 1]) || this.options.binary && buf[end - 1] === 13)) {
+          end--;
+        }
+        if (buf.length - end <= ENCODE_SLICE_SIZE) {
+          this._remainingBytes = end < buf.length ? Buffer.from(buf.subarray(end)) : false;
+          buf = buf.subarray(0, end);
+        }
+        this._encodeSlices(buf);
         done();
       }
       /** @internal */
       _flush(done) {
+        if (this._remainingBytes) {
+          this._encodeSlices(this._remainingBytes);
+          this._remainingBytes = false;
+        }
         if (this._curLine) {
           this.outputBytes += this._curLine.length;
           this.push(this._curLine, "ascii");
+          this._curLine = "";
         }
         done();
+      }
+      /**
+       * Encodes the input in slices of ENCODE_SLICE_SIZE bytes. Each slice is told the byte that
+       * follows it, so a slice that ends in whitespace is encoded as if it was not split
+       *
+       * @internal
+       */
+      _encodeSlices(buf) {
+        for (let start = 0; start < buf.length; start += ENCODE_SLICE_SIZE) {
+          const end = Math.min(start + ENCODE_SLICE_SIZE, buf.length);
+          this._encodeSlice(buf.subarray(start, end), end < buf.length ? buf[end] : void 0);
+          this._lastByte = buf[end - 1];
+        }
+      }
+      /** @internal */
+      _encodeSlice(buf, next) {
+        let qp;
+        if (this.options.lineLength) {
+          qp = wrap3(this._curLine + encodeBytes4(buf, next, this.options.binary, this._lastByte), this.options.lineLength);
+          const lastLF = qp.lastIndexOf("\n");
+          this._curLine = qp.substring(lastLF + 1);
+          qp = qp.substring(0, lastLF + 1);
+          if (qp) {
+            this.outputBytes += qp.length;
+            this.push(qp, "ascii");
+          }
+        } else {
+          qp = encodeBytes4(buf, next, this.options.binary, this._lastByte);
+          this.outputBytes += qp.length;
+          this.push(qp, "ascii");
+        }
       }
     };
   }
@@ -15473,6 +15619,9 @@ var init_qp = __esm({
 function isPlainText(value, isParam) {
   const re2 = isParam ? /[\x00-\x1f\x7f"\u0080-\uFFFF]/ : /[\x00-\x08\x0b\x0c\x0e-\x1f\u0080-\uFFFF]/;
   return typeof value === "string" && !re2.test(value);
+}
+function isPlainParamValue(value) {
+  return isPlainText(value, true) && !value.includes("=?");
 }
 function quoteString(value) {
   return '"' + (value || "").toString().replace(/["\\]/g, "\\$&") + '"';
@@ -15537,21 +15686,31 @@ function encodeWord(data, mimeWordEncoding, maxLength) {
 }
 function encodeWords(value, mimeWordEncoding, maxLength, encodeAll) {
   maxLength = maxLength || 0;
-  const firstMatch = value.match(/(?:^|\s)([^\s]*["\u0080-\uFFFF])/);
-  if (!firstMatch) {
+  let firstSpecial = -1;
+  let lastSpecial = -1;
+  for (let i2 = 0; i2 < value.length; i2++) {
+    const code = value.charCodeAt(i2);
+    if (code === 34 || code >= 128) {
+      if (firstSpecial < 0) {
+        firstSpecial = i2;
+      }
+      lastSpecial = i2;
+    }
+  }
+  if (firstSpecial < 0) {
     return value;
   }
   if (encodeAll) {
     return encodeWord(value, mimeWordEncoding, maxLength);
   }
-  const lastMatch = value.match(/(["\u0080-\uFFFF][^\s]*)[^"\u0080-\uFFFF]*$/);
-  if (!lastMatch) {
-    return value;
+  let startIndex = firstSpecial;
+  while (startIndex > 0 && !/\s/.test(value.charAt(startIndex - 1))) {
+    startIndex--;
   }
-  const startIndex = firstMatch.index + (firstMatch[0].match(/[^\s]/) || {
-    index: 0
-  }).index;
-  const endIndex = lastMatch.index + (lastMatch[1] || "").length;
+  let endIndex = lastSpecial + 1;
+  while (endIndex < value.length && !/\s/.test(value.charAt(endIndex))) {
+    endIndex++;
+  }
   return (startIndex ? value.substr(0, startIndex) : "") + encodeWord(value.substring(startIndex, endIndex), mimeWordEncoding || "Q", maxLength) + (endIndex < value.length ? value.substr(endIndex) : "");
 }
 function buildHeaderValue(structured) {
@@ -15559,7 +15718,7 @@ function buildHeaderValue(structured) {
   Object.keys(structured.params || {}).forEach((key) => {
     const value2 = structured.params[key];
     const param = key.replace(/[\x00-\x1f\x7f]/g, "");
-    if (!isPlainText(value2, true) || value2.length >= 75) {
+    if (!isPlainParamValue(value2) || value2.length >= 75) {
       buildHeaderParam(param, value2, 50).forEach((encodedParam) => {
         if (!/[\s"\\;:/=(),<>@[\]?]|^[-']|'$/.test(encodedParam.value) || encodedParam.key.substr(-1) === "*") {
           paramsArray.push(encodedParam.key + "=" + encodedParam.value);
@@ -15584,7 +15743,7 @@ function buildHeaderParam(key, data, maxLength) {
   let startPos = 0;
   let i2, len;
   maxLength = maxLength || 50;
-  if (isPlainText(data, true)) {
+  if (isPlainParamValue(data)) {
     if (encodedStr.length <= maxLength) {
       return [
         {
@@ -15675,14 +15834,29 @@ function buildHeaderParam(key, data, maxLength) {
     value: item.line
   }));
 }
+function _findCommentEnd(str, start) {
+  let depth = 0;
+  for (let i2 = start, len = str.length; i2 < len; i2++) {
+    const c2 = str.charAt(i2);
+    if (c2 === "\\") {
+      i2++;
+    } else if (c2 === "(") {
+      depth++;
+    } else if (c2 === ")" && --depth === 0) {
+      return i2;
+    }
+  }
+  return -1;
+}
 function _isParamName(name2) {
   return !!name2 && !isProtoKey(name2);
 }
-function parseHeaderValue(str) {
+function parseHeaderValue(str, options) {
   const response = {
     value: "",
     params: {}
   };
+  let stripComments = !!options?.stripComments;
   const setParam = (name2, value2) => {
     name2 = name2.toLowerCase();
     if (_isParamName(name2) && !Object.prototype.hasOwnProperty.call(response.params, name2)) {
@@ -15727,6 +15901,17 @@ function parseHeaderValue(str) {
   };
   for (let i2 = 0, len = str.length; i2 < len; i2++) {
     chr = str.charAt(i2);
+    if (stripComments && chr === "(" && !quote && !quoteClosed && !(stage === "value" && key !== false && !pendingSpace)) {
+      let end = _findCommentEnd(str, i2);
+      if (end < 0 && str.indexOf(";", i2) < 0) {
+        end = len - 1;
+      }
+      if (end >= 0) {
+        i2 = end;
+        continue;
+      }
+      stripComments = false;
+    }
     if (stage === "key") {
       if (chr === "=") {
         key = takeValue().trim();
@@ -15921,8 +16106,12 @@ var init_mime_funcs = __esm({
 });
 
 // node_modules/nodemailer/dist/esm/addressparser/index.js
+function _domainAt(address) {
+  const literal = address.charAt(address.length - 1) === "]" ? DOMAIN_LITERAL_TAIL.exec(address) : null;
+  return literal ? address.length - literal[1].length - 1 : address.lastIndexOf("@");
+}
 function _quoteLocalPart(address) {
-  const lastAt = address.lastIndexOf("@");
+  const lastAt = _domainAt(address);
   if (lastAt < 0) {
     return address;
   }
@@ -15931,6 +16120,9 @@ function _quoteLocalPart(address) {
     return address;
   }
   return '"' + user.replace(/["\\]/g, "\\$&") + '"@' + address.substr(lastAt + 1);
+}
+function _isAddrSpec(value) {
+  return ADDR_SPEC.test(value) || LITERAL_ADDR_SPEC.test(value);
 }
 function _isSpaceCode(code) {
   return code === 32 || code >= 9 && code <= 13 || code === 160 || code === 5760 || code >= 8192 && code <= 8202 || code === 8232 || code === 8233 || code === 8239 || code === 8287 || code === 12288 || code === 65279;
@@ -15948,6 +16140,37 @@ function _indexOfAt(text4, from14, to) {
     }
   }
   return -1;
+}
+function _joinAtSpacing(value, at2) {
+  if (at2 < 0) {
+    return value;
+  }
+  let start = at2;
+  while (start > 0 && _isSpaceCode(value.charCodeAt(start - 1))) {
+    start--;
+  }
+  let end = at2 + 1;
+  while (end < value.length && _isSpaceCode(value.charCodeAt(end))) {
+    end++;
+  }
+  return start === at2 && end === at2 + 1 ? value : value.slice(0, start) + "@" + value.slice(end);
+}
+function _collapseAtSpacing(value) {
+  const quoted = LEADING_QUOTED_STRING.exec(value);
+  if (quoted) {
+    let at3 = quoted[0].length;
+    while (at3 < value.length && _isSpaceCode(value.charCodeAt(at3))) {
+      at3++;
+    }
+    if (value.charAt(at3) === "@" && value.indexOf("@", at3 + 1) < 0) {
+      return _joinAtSpacing(value, at3);
+    }
+  }
+  const at2 = value.indexOf("@");
+  if (at2 < 0 || value.indexOf("@", at2 + 1) >= 0 || value.lastIndexOf('"') > at2) {
+    return value;
+  }
+  return _joinAtSpacing(value, at2);
 }
 function _looseAddressStart(text4) {
   const len = text4.length;
@@ -15998,6 +16221,7 @@ function _looseAddressStart(text4) {
   return -1;
 }
 function _recoverAddrSpec(data) {
+  data.address = _collapseAtSpacing(data.address);
   if (!HAS_WHITESPACE.test(data.address)) {
     return;
   }
@@ -16015,7 +16239,7 @@ function _recoverAddrSpec(data) {
       return;
     }
     const parts = data.address.split(/\s+/);
-    let addrIndex = parts.findIndex((part) => ADDR_SPEC.test(part));
+    let addrIndex = parts.findIndex(_isAddrSpec);
     if (addrIndex < 0) {
       addrIndex = parts.findIndex((part) => LOOSE_ADDR_SPEC.test(part));
     }
@@ -16035,6 +16259,10 @@ function _stripAddressComments(address) {
   let depth = 0;
   let closer = "";
   let lastChar = "";
+  let pendingSpace = false;
+  let firstChar = "";
+  let quoteSeen = false;
+  let routeEnd = -1;
   for (let i2 = 0, len = address.length; i2 < len; i2++) {
     const chr = address.charAt(i2);
     if (depth) {
@@ -16046,14 +16274,18 @@ function _stripAddressComments(address) {
       } else if (chr === ")" && !--depth) {
         comments.push(comment.trim());
         comment = "";
-        if (lastChar !== "@" && address.charAt(i2 + 1) !== "@") {
-          result += " ";
-          lastChar = " ";
-        }
+        pendingSpace = lastChar !== "@";
       } else {
         comment += chr;
       }
       continue;
+    }
+    if (pendingSpace && chr !== "(") {
+      pendingSpace = false;
+      if (chr !== "@" && chr !== "<" && !_isSpaceCode(address.charCodeAt(i2))) {
+        result += " ";
+        lastChar = " ";
+      }
     }
     if (closer) {
       if (chr === "\\" && closer === '"' && i2 < len - 1) {
@@ -16066,49 +16298,61 @@ function _stripAddressComments(address) {
       }
     } else if (chr === '"') {
       closer = '"';
+      quoteSeen = true;
+    } else if (chr === ":" && routeEnd < 0 && firstChar === "@" && !quoteSeen) {
+      routeEnd = result.length + 1;
     } else if (chr === "[") {
       closer = "]";
     } else if (chr === "(") {
       depth = 1;
       continue;
+    } else if (chr === "<") {
+      result = "";
+      lastChar = "";
+      comments.length = 0;
+      firstChar = "";
+      quoteSeen = false;
+      routeEnd = -1;
+      continue;
     }
     result += chr;
     lastChar = chr;
+    if (!firstChar && !_isSpaceCode(address.charCodeAt(i2))) {
+      firstChar = chr;
+    }
+  }
+  if (routeEnd >= 0 && result.indexOf("@", routeEnd) >= 0) {
+    result = result.slice(routeEnd);
   }
   if (depth) {
     comments.push(comment.trim());
   }
   return { address: result.trim(), comments: comments.filter((text4) => text4) };
 }
-function _handleAddress(tokens, depth) {
-  let isGroup = false;
+function _collectAddressParts(tokens, from14, to) {
   let state = "text";
-  const addresses = [];
   const data = {
     address: [],
     comment: [],
-    group: [],
     text: [],
-    textWasQuoted: []
+    textWasQuoted: [],
+    quotedLocalAt: []
   };
   let insideQuotes = false;
-  const lastChars = { address: "", comment: "", group: "", text: "" };
-  for (let i2 = 0, len = tokens.length; i2 < len; i2++) {
-    const token = tokens[i2];
-    const prevToken = i2 ? tokens[i2 - 1] : null;
-    if (token.type === "operator") {
-      switch (token.value) {
+  let lastTextPureQuoted = false;
+  const lastChars = { address: "", comment: "", text: "" };
+  for (let i2 = from14; i2 < to; i2++) {
+    const value = tokens.value(i2);
+    const prevOperator = i2 > from14 ? tokens.operatorAt(i2 - 1) : "";
+    const prevNoBreak = i2 > from14 && tokens.noBreak(i2 - 1);
+    if (tokens.isOperator(i2)) {
+      switch (value) {
         case "<":
           state = "address";
           insideQuotes = false;
           break;
         case "(":
           state = "comment";
-          insideQuotes = false;
-          break;
-        case ":":
-          state = "group";
-          isGroup = true;
           insideQuotes = false;
           break;
         case '"':
@@ -16120,27 +16364,94 @@ function _handleAddress(tokens, depth) {
           insideQuotes = false;
           break;
       }
-    } else if (token.value) {
-      const prevPrevToken = i2 > 1 ? tokens[i2 - 2] : null;
-      const opensAfterEmptyQuotedString = prevToken?.type === "operator" && prevToken.value === '"' && !!prevToken.noBreak && prevPrevToken?.type === "operator" && prevPrevToken.value === '"';
-      if (state === "address") {
-        token.value = token.value.replace(/^[^<]*<\s*/, "");
-      }
+    } else {
+      const opensAfterEmptyQuotedString = prevOperator === '"' && prevNoBreak && i2 > from14 + 1 && tokens.operatorAt(i2 - 2) === '"';
       const parts = data[state];
-      const joins = prevToken && prevToken.noBreak && parts.length && (prevToken.value !== ")" || lastChars[state] === "@" || token.value.charAt(0) === "@");
+      const joins = prevNoBreak && parts.length && (prevOperator !== ")" || lastChars[state] === "@" || value.charAt(0) === "@");
       if (joins) {
-        data[state][data[state].length - 1] += token.value;
-        if (token.value) {
-          lastChars[state] = token.value.charAt(token.value.length - 1);
+        const last = data[state].length - 1;
+        if (state === "text" && !insideQuotes) {
+          if (lastTextPureQuoted && value.charAt(0) === "@") {
+            data.quotedLocalAt[last] = data.text[last].length;
+          }
+          lastTextPureQuoted = false;
         }
+        data[state][last] += value;
+        lastChars[state] = value.charAt(value.length - 1);
         if (state === "text" && insideQuotes) {
-          data.textWasQuoted[data.textWasQuoted.length - 1] = true;
+          data.textWasQuoted[last] = true;
         }
       } else {
-        data[state].push(token.value);
-        lastChars[state] = token.value.charAt(token.value.length - 1);
+        data[state].push(value);
+        lastChars[state] = value.charAt(value.length - 1);
         if (state === "text") {
           data.textWasQuoted.push(insideQuotes || opensAfterEmptyQuotedString);
+          data.quotedLocalAt.push(opensAfterEmptyQuotedString && value.charAt(0) === "@" ? 0 : -1);
+          lastTextPureQuoted = insideQuotes;
+        }
+      }
+    }
+  }
+  let textFromComment = false;
+  if (!data.text.length && data.comment.length) {
+    data.text = data.comment;
+    data.comment = [];
+    textFromComment = true;
+  }
+  return { data, textFromComment };
+}
+function _groupName(tokens, from14, to) {
+  return _collectAddressParts(tokens, from14, to).data.text.join(" ");
+}
+function _handleAddress(tokens, from14, to) {
+  const collected = _collectAddressParts(tokens, from14, to);
+  const data = collected.data;
+  let textFromComment = collected.textFromComment;
+  const addressComments = [];
+  const addressParts = [];
+  for (const part of data.address) {
+    const stripped = _stripAddressComments(part);
+    for (const comment of stripped.comments) {
+      addressComments.push(comment);
+    }
+    if (stripped.address) {
+      addressParts.push(stripped.address);
+    }
+  }
+  data.address = addressParts;
+  if (!data.address.length && data.text.length && !textFromComment) {
+    const candidates = data.text.map((part) => _collapseAtSpacing(part));
+    for (let i2 = 0; i2 < data.text.length; i2++) {
+      const local = data.quotedLocalAt[i2];
+      const quotedLocal = data.textWasQuoted[i2] && local >= 0 && QUOTED_LOCAL_DOMAIN.test(data.text[i2].slice(local)) ? _quoteLocalPart(data.text[i2]) : "";
+      if (quotedLocal || !data.textWasQuoted[i2] && _isAddrSpec(candidates[i2])) {
+        data.address = [quotedLocal || candidates[i2]];
+        data.text.splice(i2, 1);
+        data.textWasQuoted.splice(i2, 1);
+        data.quotedLocalAt.splice(i2, 1);
+        break;
+      }
+    }
+    if (!data.address.length) {
+      let extracted = false;
+      for (let i2 = 0; i2 < data.text.length; i2++) {
+        if (!data.textWasQuoted[i2]) {
+          const part = candidates[i2];
+          let remainder = data.text[i2];
+          const at2 = _looseAddressStart(part);
+          if (at2 >= 0) {
+            LOOSE_TEXT_ADDR.lastIndex = at2;
+            const match2 = LOOSE_TEXT_ADDR.exec(part);
+            if (match2) {
+              data.address = [match2[0].trim()];
+              extracted = true;
+              remainder = part.slice(0, at2) + " " + part.slice(at2 + match2[0].length);
+            }
+          }
+          data.text[i2] = remainder.trim();
+          if (extracted) {
+            break;
+          }
         }
       }
     }
@@ -16149,148 +16460,85 @@ function _handleAddress(tokens, depth) {
     data.text = data.comment;
     data.comment = [];
   }
-  if (isGroup) {
-    data.text = data.text.join(" ");
-    let groupMembers = [];
-    if (data.group.length) {
-      const parsedGroup = _parseAddressList(data.group.join(","), depth + 1);
-      parsedGroup.forEach((member) => {
-        if (member.group) {
-          groupMembers = groupMembers.concat(member.group);
-        } else {
-          groupMembers.push(member);
-        }
-      });
-    }
-    addresses.push({
-      name: data.text || "",
-      group: groupMembers
-    });
-  } else {
-    const addressComments = [];
-    const addressParts = [];
-    for (const part of data.address) {
-      if (part.indexOf("(") < 0) {
-        addressParts.push(part);
-        continue;
-      }
-      const stripped = _stripAddressComments(part);
-      for (const comment of stripped.comments) {
-        addressComments.push(comment);
-      }
-      if (stripped.address) {
-        addressParts.push(stripped.address);
-      }
-    }
-    data.address = addressParts;
-    if (!data.address.length && data.text.length) {
-      for (let i2 = data.text.length - 1; i2 >= 0; i2--) {
-        if (!data.textWasQuoted[i2] && ADDR_SPEC.test(data.text[i2])) {
-          data.address = data.text.splice(i2, 1);
-          data.textWasQuoted.splice(i2, 1);
-          break;
-        }
-      }
-      if (!data.address.length) {
-        let extracted = false;
-        for (let i2 = data.text.length - 1; i2 >= 0; i2--) {
-          if (!data.textWasQuoted[i2]) {
-            const part = data.text[i2];
-            let remainder = part;
-            const at2 = _looseAddressStart(part);
-            if (at2 >= 0) {
-              LOOSE_TEXT_ADDR.lastIndex = at2;
-              const match2 = LOOSE_TEXT_ADDR.exec(part);
-              if (match2) {
-                data.address = [match2[0].trim()];
-                extracted = true;
-                remainder = part.slice(0, at2) + " " + part.slice(at2 + match2[0].length);
-              }
-            }
-            data.text[i2] = remainder.trim();
-            if (extracted) {
-              break;
-            }
-          }
-        }
-      }
-    }
-    if (!data.text.length && data.comment.length) {
-      data.text = data.comment;
-      data.comment = [];
-    }
-    if (data.address.length > 1) {
-      data.text = data.text.concat(data.address.splice(1));
-    }
-    const addressFromQuotedText = !data.address.length && data.textWasQuoted.some((wasQuoted) => wasQuoted);
-    data.text = data.text.join(" ");
-    data.address = data.address.join(" ");
-    if (addressFromQuotedText && data.text.indexOf("@") >= 0) {
-      data.address = _quoteLocalPart(data.text);
-      data.text = "";
-    }
-    _recoverAddrSpec(data);
-    if (!data.text && addressComments.length) {
-      data.text = addressComments.join(" ");
-    }
-    const address = {
-      address: data.address || data.text || "",
-      name: data.text || data.address || ""
-    };
-    if (address.address === address.name) {
-      if (/@/.test(address.address || "")) {
-        address.name = "";
-      } else {
-        address.address = "";
-      }
-    }
-    addresses.push(address);
+  if (data.address.length > 1) {
+    data.text = data.text.concat(data.address.splice(1));
   }
-  return addresses;
-}
-function _parseAddressList(str, depth) {
-  if (depth > MAX_NESTED_GROUP_DEPTH) {
-    return [];
+  const addressFromQuotedText = !data.address.length && data.textWasQuoted.some((wasQuoted) => wasQuoted);
+  data.text = data.text.join(" ");
+  data.address = data.address.join(" ");
+  if (addressFromQuotedText && data.text.indexOf("@") >= 0) {
+    data.address = _quoteLocalPart(_joinAtSpacing(data.text, _domainAt(data.text)));
+    data.text = "";
   }
-  const tokenizer = new Tokenizer(str);
-  const tokens = tokenizer.tokenize();
-  const addresses = [];
-  let address = [];
-  const parsedAddresses = [];
-  tokens.forEach((token) => {
-    if (token.type === "operator" && (token.value === "," || token.value === ";")) {
-      if (address.length) {
-        addresses.push(address);
-      }
-      address = [];
+  _recoverAddrSpec(data);
+  if (!data.text && addressComments.length) {
+    data.text = addressComments.join(" ");
+    textFromComment = true;
+  }
+  const address = {
+    address: data.address || (textFromComment ? "" : data.text) || "",
+    name: data.text || data.address || ""
+  };
+  if (address.address === address.name) {
+    if (/@/.test(address.address || "")) {
+      address.name = "";
     } else {
-      address.push(token);
+      address.address = "";
     }
-  });
-  if (address.length) {
-    addresses.push(address);
   }
-  addresses.forEach((addr) => {
-    const handled = _handleAddress(addr, depth);
-    for (let i2 = 0; i2 < handled.length; i2++) {
-      parsedAddresses.push(handled[i2]);
-    }
-  });
-  const mergedAddresses = [];
-  for (let i2 = parsedAddresses.length - 1; i2 >= 0; i2--) {
-    const current = parsedAddresses[i2];
-    const next = mergedAddresses.length ? mergedAddresses[mergedAddresses.length - 1] : null;
+  return address;
+}
+function _mergeNameFragments(list) {
+  const merged = [];
+  for (let i2 = list.length - 1; i2 >= 0; i2--) {
+    const current = list[i2];
+    const next = merged.length ? merged[merged.length - 1] : null;
     if (next && current.address === "" && current.name && !current.group && next.address && next.name) {
       next.name = current.name + ", " + next.name;
     } else {
-      mergedAddresses.push(current);
+      merged.push(current);
     }
   }
-  mergedAddresses.reverse();
-  return mergedAddresses;
+  return merged.reverse();
+}
+function _parseAddressList(str) {
+  const tokens = new Tokenizer(str).tokenize();
+  const parsedAddresses = [];
+  let group = null;
+  let members = [];
+  let from14 = 0;
+  for (let i2 = 0, len = tokens.length; i2 <= len; i2++) {
+    const operator = i2 < len ? tokens.operatorAt(i2) : "";
+    if (i2 < len && operator !== "," && operator !== ";" && operator !== ":") {
+      continue;
+    }
+    if (operator === ":") {
+      if (!group) {
+        group = { name: _groupName(tokens, from14, i2), group: [] };
+        members = [];
+      }
+      from14 = i2 + 1;
+      continue;
+    }
+    if (i2 > from14) {
+      const address = _handleAddress(tokens, from14, i2);
+      if (group) {
+        members.push(address);
+      } else {
+        parsedAddresses.push(address);
+      }
+    }
+    from14 = i2 + 1;
+    if (group && (operator === ";" || i2 === len)) {
+      group.group = _mergeNameFragments(members);
+      parsedAddresses.push(group);
+      group = null;
+    }
+  }
+  return _mergeNameFragments(parsedAddresses);
 }
 function addressparser(str, options) {
-  const parsedAddresses = _parseAddressList(str, 0);
+  const parsedAddresses = _parseAddressList(str);
   if (options?.flatten) {
     const flatAddresses = [];
     const walkAddressList = (list) => {
@@ -16306,30 +16554,103 @@ function addressparser(str, options) {
   }
   return parsedAddresses;
 }
-var HAS_WHITESPACE, QUOTED_LOCAL_ADDR, ADDR_SPEC, LOOSE_ADDR_SPEC, LOOSE_TEXT_ADDR, Tokenizer, MAX_NESTED_GROUP_DEPTH, addressparser_default;
+var TOKEN_OPERATOR, TOKEN_NO_BREAK, TOKEN_DIRTY, TOKEN_ESCAPES, TOKEN_STARTS_ESCAPED, TokenList, DOMAIN_LITERAL_TAIL, HAS_WHITESPACE, QUOTED_LOCAL_ADDR, ADDR_SPEC, LITERAL_ADDR_SPEC, QUOTED_LOCAL_DOMAIN, LOOSE_ADDR_SPEC, LOOSE_TEXT_ADDR, LEADING_QUOTED_STRING, Tokenizer, addressparser_default;
 var init_addressparser = __esm({
   "node_modules/nodemailer/dist/esm/addressparser/index.js"() {
+    TOKEN_OPERATOR = 1;
+    TOKEN_NO_BREAK = 2;
+    TOKEN_DIRTY = 4;
+    TOKEN_ESCAPES = 8;
+    TOKEN_STARTS_ESCAPED = 16;
+    TokenList = class {
+      constructor(str) {
+        this.str = str;
+        this.slots = new Int32Array(48);
+        this.length = 0;
+        this.cleaned = /* @__PURE__ */ new Map();
+      }
+      /**
+       * Appends a token
+       *
+       * @param kind Kind and flags of the token
+       * @param start Offset of its first character
+       * @param end Offset just past its last character
+       * @return Index of the token
+       */
+      push(kind, start, end) {
+        if ((this.length + 1) * 3 > this.slots.length) {
+          const grown = new Int32Array(this.slots.length * 2);
+          grown.set(this.slots);
+          this.slots = grown;
+        }
+        const at2 = this.length * 3;
+        this.slots[at2] = kind;
+        this.slots[at2 + 1] = start;
+        this.slots[at2 + 2] = end;
+        return this.length++;
+      }
+      /**
+       * The character of an operator token, an empty string for a text run
+       */
+      operatorAt(index2) {
+        const at2 = index2 * 3;
+        return this.slots[at2] & TOKEN_OPERATOR ? this.str.charAt(this.slots[at2 + 1]) : "";
+      }
+      /**
+       * Whether a token is an operator
+       */
+      isOperator(index2) {
+        return (this.slots[index2 * 3] & TOKEN_OPERATOR) !== 0;
+      }
+      /**
+       * Whether the next character continues the run of a token without whitespace in between
+       */
+      noBreak(index2) {
+        return (this.slots[index2 * 3] & TOKEN_NO_BREAK) !== 0;
+      }
+      /**
+       * Value of a token
+       */
+      value(index2) {
+        const cleaned = this.cleaned.get(index2);
+        if (cleaned !== void 0) {
+          return cleaned;
+        }
+        return this.str.slice(this.slots[index2 * 3 + 1], this.slots[index2 * 3 + 2]);
+      }
+    };
+    DOMAIN_LITERAL_TAIL = /@(\[[^[\]\\]*\])$/;
     HAS_WHITESPACE = /\s/;
     QUOTED_LOCAL_ADDR = /^("(?:[^"\\]|\\[\s\S])*"@\S+)(?:\s+([\s\S]+))?$/;
     ADDR_SPEC = /^[^@\s]+@[^@\s]+$/;
+    LITERAL_ADDR_SPEC = /^[^@\s]+@\[[^[\]\\\s]*\]$/;
+    QUOTED_LOCAL_DOMAIN = /^@(?:[^@\s"]+|\[[^[\]\\\s]*\])$/;
     LOOSE_ADDR_SPEC = /^[^@\s]+@\S+$/;
     LOOSE_TEXT_ADDR = /\s*\b[^@\s]+@[^\s]+\b\s*/y;
+    LEADING_QUOTED_STRING = /^"(?:[^"\\]|\\[\s\S])*"/;
     Tokenizer = class {
       constructor(str) {
         this.str = (str || "").toString();
         this.operatorCurrent = "";
         this.operatorExpecting = "";
-        this.node = null;
+        this.node = -1;
         this.escaped = false;
         this.inDomainLiteral = false;
         this.afterAt = false;
-        this.list = [];
+        this.inGroup = false;
+        this.innerQuoted = false;
+        this.innerComment = 0;
+        this.innerLiteral = false;
+        this.innerEscaped = false;
+        this.list = new TokenList(this.str);
         this.operators = {
           '"': '"',
           "(": ")",
           "<": ">",
           ",": "",
-          ":": ";",
+          // A group is read in the same pass as the rest of the list, so its ':' only marks
+          // where the name ends and its members are tokenized like any other address
+          ":": "",
           // Semicolons are not a legal delimiter per the RFC2822 grammar other
           // than for terminating a group, but they are also not valid for any
           // other use in this context.  Given that some mail clients have
@@ -16345,27 +16666,92 @@ var init_addressparser = __esm({
        * @return An array of operator|text tokens
        */
       tokenize() {
-        const list = [];
-        for (let i2 = 0, len = this.str.length; i2 < len; i2++) {
-          const chr = this.str.charAt(i2);
-          const nextChr = i2 < len - 1 ? this.str.charAt(i2 + 1) : null;
-          this.checkChar(chr, nextChr);
+        const str = this.str;
+        const len = str.length;
+        for (let i2 = 0; i2 < len; i2++) {
+          this.checkChar(str.charAt(i2), i2);
         }
-        this.list.forEach((node) => {
-          node.value = (node.value || "").toString().trim();
-          if (node.value) {
-            list.push(node);
+        this._closeText(len);
+        const list = this.list;
+        const slots = list.slots;
+        let kept = 0;
+        for (let i2 = 0, count = list.length; i2 < count; i2++) {
+          const kind = slots[i2 * 3];
+          let start = slots[i2 * 3 + 1];
+          let end = slots[i2 * 3 + 2];
+          if (kind & TOKEN_DIRTY) {
+            const value = this._cleanValue(start, end, kind).trim();
+            if (!value) {
+              continue;
+            }
+            list.cleaned.set(kept, value);
+          } else if (!(kind & TOKEN_OPERATOR)) {
+            while (start < end && _isSpaceCode(str.charCodeAt(start))) {
+              start++;
+            }
+            while (end > start && _isSpaceCode(str.charCodeAt(end - 1))) {
+              end--;
+            }
+            if (start === end) {
+              continue;
+            }
           }
-        });
+          slots[kept * 3] = kind;
+          slots[kept * 3 + 1] = start;
+          slots[kept * 3 + 2] = end;
+          kept++;
+        }
+        list.length = kept;
         return list;
+      }
+      /**
+       * Ends the text run being collected, if there is one
+       *
+       * @param end Offset just past its last character
+       */
+      _closeText(end) {
+        if (this.node >= 0) {
+          this.list.slots[this.node * 3 + 2] = end;
+          this.node = -1;
+        }
+      }
+      /**
+       * Rebuilds the value of a text run that is no plain slice of the field, applying the
+       * rules checkChar collects characters by: an escaping backslash is dropped, a line break
+       * reads as a space and any other control character is left out
+       *
+       * @param start Offset of the first character of the run
+       * @param end Offset just past its last character
+       * @param kind Kind and flags of the run
+       * @return Value of the run
+       */
+      _cleanValue(start, end, kind) {
+        const str = this.str;
+        const escapes = (kind & TOKEN_ESCAPES) !== 0;
+        let escaped = (kind & TOKEN_STARTS_ESCAPED) !== 0;
+        let value = "";
+        for (let i2 = start; i2 < end; i2++) {
+          const chr = str.charAt(i2);
+          if (escapes && !escaped && chr === "\\") {
+            escaped = true;
+            continue;
+          }
+          escaped = false;
+          if (chr === "\n") {
+            value += " ";
+          } else if (chr.charCodeAt(0) >= 33 || chr === " " || chr === "	") {
+            value += chr;
+          }
+        }
+        return value;
       }
       /**
        * Checks if a character is an operator or text and acts accordingly
        *
        * @param chr Character from the address field
-       * @param nextChr Character following chr, null at the end of the field
+       * @param i Offset of the character in the field
        */
-      checkChar(chr, nextChr) {
+      checkChar(chr, i2) {
         if (!this.escaped && !this.operatorExpecting) {
           if (!this.inDomainLiteral && chr === "[" && this.afterAt) {
             this.inDomainLiteral = true;
@@ -16373,60 +16759,138 @@ var init_addressparser = __esm({
             this.inDomainLiteral = false;
           }
         }
-        if (this.escaped) {
-        } else if (chr === this.operatorExpecting) {
-          this.node = {
-            type: "operator",
-            value: chr
-          };
-          if (nextChr && ![" ", "	", "\r", "\n", ",", ";"].includes(nextChr)) {
-            this.node.noBreak = true;
+        let nested = false;
+        if (this.operatorExpecting === ">") {
+          nested = this._trackInner(chr);
+          if (!nested && chr === ";" && this.inGroup) {
+            this._closeText(i2);
+            this.operatorExpecting = "";
+            this._resetInner();
           }
-          this.list.push(this.node);
-          this.node = null;
+        } else if (this.operatorExpecting === ")" && !this.escaped) {
+          if (chr === "(") {
+            this.innerComment++;
+          } else if (chr === ")" && this.innerComment) {
+            this.innerComment--;
+            nested = true;
+          }
+        }
+        if (this.escaped) {
+        } else if (chr === this.operatorExpecting && !nested) {
+          const nextChr = this.str.charAt(i2 + 1);
+          this._closeText(i2);
+          this.list.push(nextChr && ![" ", "	", "\r", "\n", ",", ";"].includes(nextChr) ? TOKEN_OPERATOR | TOKEN_NO_BREAK : TOKEN_OPERATOR, i2, i2 + 1);
           if (chr !== ")") {
             this.afterAt = false;
           }
           this.operatorExpecting = "";
           this.escaped = false;
+          this._resetInner();
           return;
         } else if (!this.operatorExpecting && !(this.inDomainLiteral && chr === ":") && chr in this.operators) {
-          this.node = {
-            type: "operator",
-            value: chr
-          };
-          this.list.push(this.node);
-          this.node = null;
+          this._closeText(i2);
+          this.list.push(TOKEN_OPERATOR, i2, i2 + 1);
+          if (chr === ":") {
+            this.inGroup = true;
+          } else if (chr === ";") {
+            this.inGroup = false;
+          }
           if (chr !== "(") {
             this.afterAt = false;
           }
           this.operatorExpecting = this.operators[chr];
           this.escaped = false;
+          this._resetInner();
           return;
         } else if (['"', "'", ")"].includes(this.operatorExpecting) && chr === "\\") {
           this.escaped = true;
+          if (this.node >= 0) {
+            this.list.slots[this.node * 3] |= TOKEN_DIRTY;
+          }
           return;
         }
-        if (!this.node) {
-          this.node = {
-            type: "text",
-            value: ""
-          };
-          this.list.push(this.node);
+        if (this.node < 0) {
+          this.node = this.list.push((this.operatorExpecting === '"' || this.operatorExpecting === ")" ? TOKEN_ESCAPES : 0) | (this.escaped ? TOKEN_STARTS_ESCAPED : 0), i2, i2);
         }
         if (chr === "\n") {
           chr = " ";
+          this.list.slots[this.node * 3] |= TOKEN_DIRTY;
         }
-        if (chr.charCodeAt(0) >= 33 || [" ", "	"].includes(chr)) {
-          this.node.value += chr;
+        if (chr.charCodeAt(0) >= 33 || chr === " " || chr === "	") {
           if (!this.operatorExpecting && chr !== " " && chr !== "	") {
             this.afterAt = chr === "@";
           }
+        } else {
+          this.list.slots[this.node * 3] |= TOKEN_DIRTY;
         }
         this.escaped = false;
       }
+      /**
+       * Tracks the quoted strings, comments and domain literals inside an angle-addr, which its
+       * closer must not be read from. A backslash escapes the next character inside a quoted
+       * string and a comment. A domain literal opens right after an "@" and ends at the "]".
+       * dtext holds the list separators as well, and inside the brackets they never split the
+       * list anyway.
+       *
+       * @param chr Character from the address field
+       * @return true while the character sits inside one of them, the one that closes it included
+       */
+      _trackInner(chr) {
+        if (this.innerEscaped) {
+          this.innerEscaped = false;
+          return true;
+        }
+        if (this.innerQuoted) {
+          if (chr === "\\") {
+            this.innerEscaped = true;
+          } else if (chr === '"') {
+            this.innerQuoted = false;
+          }
+          return true;
+        }
+        if (this.innerComment) {
+          if (chr === "\\") {
+            this.innerEscaped = true;
+          } else if (chr === "(") {
+            this.innerComment++;
+          } else if (chr === ")") {
+            this.innerComment--;
+          }
+          return true;
+        }
+        if (this.innerLiteral) {
+          if (chr === "]") {
+            this.innerLiteral = false;
+          }
+          return true;
+        }
+        if (chr === '"') {
+          this.innerQuoted = true;
+          return true;
+        }
+        if (chr === "(") {
+          this.innerComment = 1;
+          return true;
+        }
+        if (chr === "[" && this.afterAt) {
+          this.innerLiteral = true;
+          return true;
+        }
+        if (!_isSpaceCode(chr.charCodeAt(0))) {
+          this.afterAt = chr === "@";
+        }
+        return false;
+      }
+      /**
+       * Forgets the nesting collected for the operator that just opened or ended
+       */
+      _resetInner() {
+        this.innerQuoted = false;
+        this.innerComment = 0;
+        this.innerLiteral = false;
+        this.innerEscaped = false;
+      }
     };
-    MAX_NESTED_GROUP_DEPTH = 50;
     addressparser_default = addressparser;
   }
 });
@@ -16545,22 +17009,60 @@ var init_le_unix = __esm({
 // node_modules/nodemailer/dist/esm/mime-node/index.js
 import crypto3 from "node:crypto";
 import fs2 from "node:fs";
-import { PassThrough as PassThrough2 } from "node:stream";
+import { PassThrough as PassThrough2, finished as finished2, pipeline } from "node:stream";
 import urlModule from "node:url";
+function stripWhitespaceInAngleBrackets(value) {
+  let result = "";
+  let pos = 0;
+  for (; ; ) {
+    const open = value.indexOf("<", pos);
+    if (open < 0) {
+      break;
+    }
+    const close = value.indexOf(">", open + 1);
+    if (close < 0) {
+      break;
+    }
+    result += value.slice(pos, open) + value.slice(open, close + 1).replace(/\s/g, "");
+    pos = close + 1;
+  }
+  return result + value.slice(pos);
+}
+function abortedError() {
+  const err = new Error("Message stream was closed before the message was generated");
+  err.code = ESTREAM;
+  return err;
+}
+function exceedsDomainLimits(domain) {
+  let total = 0;
+  let label = 0;
+  for (const char3 of domain) {
+    total++;
+    if (char3 === "." || char3 === "\u3002" || char3 === "\uFF0E" || char3 === "\uFF61") {
+      label = 0;
+    } else if (++label > MAX_LABEL_LENGTH) {
+      return true;
+    }
+  }
+  return total > MAX_DOMAIN_LENGTH;
+}
 function normalizeDomain(domain, toUnicode2) {
-  const mapper = toUnicode2 ? urlModule.domainToUnicode : urlModule.domainToASCII;
-  if (typeof mapper === "function" && !URL_PARSER_UNSAFE.test(domain)) {
-    const mapped = mapper(domain);
+  if (typeof urlModule.domainToASCII === "function" && typeof urlModule.domainToUnicode === "function" && !URL_PARSER_UNSAFE.test(domain)) {
+    const ascii = urlModule.domainToASCII(domain);
+    const mapped = ascii && toUnicode2 ? urlModule.domainToUnicode(ascii) : ascii;
     if (mapped) {
       return mapped;
     }
+  }
+  if (exceedsDomainLimits(domain)) {
+    return domain;
   }
   return toUnicode2 ? toUnicode(domain) : toASCII(domain);
 }
 function _stripBoundaryControls(value) {
   return value.replace(/[\x00-\x1f\x7f]+/g, "");
 }
-var FORMATTED_HEADERS, ATEXT, DOT_ATOM, QUOTED_STRING, PLAIN_ADDRESS, URL_PARSER_UNSAFE, MimeNode, mime_node_default;
+var FORMATTED_HEADERS, ATEXT, DOT_ATOM, QUOTED_STRING, PLAIN_ADDRESS, DOMAIN_LITERAL_TAIL2, URL_PARSER_UNSAFE, MAX_DOMAIN_LENGTH, MAX_LABEL_LENGTH, PIPELINE_NOOP, MimeNode, mime_node_default;
 var init_mime_node = __esm({
   "node_modules/nodemailer/dist/esm/mime-node/index.js"() {
     init_punycode();
@@ -16579,7 +17081,11 @@ var init_mime_node = __esm({
     DOT_ATOM = new RegExp("^" + ATEXT + "+(?:\\." + ATEXT + "+)*$");
     QUOTED_STRING = /^"(?:[^"\\]|\\[\s\S])*"$/;
     PLAIN_ADDRESS = /^[^\s"(),:;<>@[\\\]]+@[^\s"(),:;<>@[\\\]]+$/;
+    DOMAIN_LITERAL_TAIL2 = /@(\[[^[\]\\]*\])$/;
     URL_PARSER_UNSAFE = /[/\\?#%\x00-\x20\x7F]/;
+    MAX_DOMAIN_LENGTH = 253;
+    MAX_LABEL_LENGTH = 63;
+    PIPELINE_NOOP = () => false;
     MimeNode = class _MimeNode {
       constructor(contentType, options) {
         this.nodeCounter = 0;
@@ -16799,11 +17305,7 @@ var init_mime_node = __esm({
       setContent(content) {
         this.content = content;
         if (typeof this.content.pipe === "function") {
-          this._contentErrorHandler = (err) => {
-            this.content.removeListener("error", this._contentErrorHandler);
-            this.content = err;
-          };
-          this.content.once("error", this._contentErrorHandler);
+          recordStreamErrors(this.content);
         } else if (typeof this.content === "string") {
           this._isPlainText = isPlainText(this.content);
           if (this._isPlainText && hasLongerLines(this.content, 76)) {
@@ -16925,19 +17427,29 @@ var init_mime_node = __esm({
             return;
           }
           switch (header.key) {
+            // The comments of a MIME header are not part of its value and are dropped, so a
+            // caller supplied 'boundary=b (comment)' is the boundary b it names, and the
+            // header goes out without the comment
             case "Content-Disposition":
-              structured = parseHeaderValue(value);
+              structured = parseHeaderValue(value, { stripComments: true });
               if (this.filename) {
                 structured.params.filename = this.filename;
               }
               value = buildHeaderValue(structured);
               break;
             case "Content-Type":
-              structured = parseHeaderValue(value);
+              structured = parseHeaderValue(value, { stripComments: true });
               structured.value = (structured.value || "").toString().replace(/[\x00-\x1f\x7f]/g, "");
               this._handleContentType(structured);
               if (structured.value.match(/^text\/plain\b/) && typeof this.content === "string" && /[\u0080-\uFFFF]/.test(this.content)) {
                 structured.params.charset = "utf-8";
+              }
+              if (this.filename) {
+                for (const paramKey of Object.keys(structured.params)) {
+                  if (/^name(\*|$)/i.test(paramKey)) {
+                    delete structured.params[paramKey];
+                  }
+                }
               }
               value = buildHeaderValue(structured);
               if (this.filename) {
@@ -16954,7 +17466,7 @@ var init_mime_node = __esm({
               }
               break;
           }
-          value = this._encodeHeaderValue(key, value);
+          value = this.encodeHeaderValue(key, value);
           if (!(value || "").toString().trim()) {
             return;
           }
@@ -16978,37 +17490,38 @@ var init_mime_node = __esm({
       createReadStream(options) {
         options = options || {};
         const stream = new PassThrough2(options);
-        let outputStream = stream;
-        let transform;
         this.stream(stream, options, (err) => {
           if (err) {
-            outputStream.emit("error", err);
+            stream.destroy(err);
             return;
           }
           stream.end();
         });
-        for (let i2 = 0, len = this._transforms.length; i2 < len; i2++) {
-          transform = typeof this._transforms[i2] === "function" ? this._transforms[i2]() : this._transforms[i2];
-          outputStream.once("error", (err) => {
-            transform.emit("error", err);
-          });
-          outputStream = outputStream.pipe(transform);
-        }
-        transform = new LastNewline();
-        outputStream.once("error", (err) => {
-          transform.emit("error", err);
+        stream.once("close", () => {
+          if (!stream.writableFinished) {
+            this._destroyContentStreams();
+          }
         });
-        outputStream = outputStream.pipe(transform);
-        for (let i2 = 0, len = this._processFuncs.length; i2 < len; i2++) {
-          transform = this._processFuncs[i2];
-          outputStream = transform(outputStream);
+        const stages = [stream];
+        for (const transform of this._transforms) {
+          stages.push(typeof transform === "function" ? transform() : transform);
+        }
+        stages.push(new LastNewline());
+        let outputStream = pipeline(stages, PIPELINE_NOOP);
+        for (const processFunc of this._processFuncs) {
+          const input = outputStream;
+          outputStream = processFunc(input);
+          if (outputStream !== input) {
+            finished2(outputStream, (err) => {
+              if (err) {
+                input.destroy();
+              }
+            });
+          }
         }
         if (this.newline) {
           const winbreak = ["win", "windows", "dos", "\r\n"].includes(this.newline.toString().toLowerCase());
-          const newlineTransform = winbreak ? new LeWindows() : new LeUnix();
-          const stream2 = outputStream.pipe(newlineTransform);
-          outputStream.on("error", (err) => stream2.emit("error", err));
-          return stream2;
+          outputStream = pipeline(outputStream, winbreak ? new LeWindows() : new LeUnix(), PIPELINE_NOOP);
         }
         return outputStream;
       }
@@ -17034,19 +17547,41 @@ var init_mime_node = __esm({
       }
       stream(outputStream, options, done) {
         const transferEncoding = this.getTransferEncoding();
-        let contentStream;
-        let localStream;
+        let activeStreams = [];
         let returned = false;
         const callback = (err) => {
           if (returned) {
             return;
           }
           returned = true;
+          outputStream.removeListener("close", onOutputClose);
           done(err);
+        };
+        function onOutputClose() {
+          for (const stream of activeStreams) {
+            stream.destroy();
+          }
+          return callback(abortedError());
+        }
+        const readInto = (...streams) => {
+          if (!activeStreams.length) {
+            outputStream.once("close", onOutputClose);
+          }
+          activeStreams = streams;
+        };
+        const aborted = () => {
+          if (outputStream.destroyed) {
+            callback(abortedError());
+            return true;
+          }
+          return false;
         };
         const finalize = () => {
           let childId = 0;
           const processChildNode = () => {
+            if (aborted()) {
+              return;
+            }
             if (childId >= this.childNodes.length) {
               outputStream.write("\r\n--" + this.boundary + "--\r\n");
               return callback();
@@ -17067,83 +17602,74 @@ var init_mime_node = __esm({
           }
         };
         const sendContent = () => {
-          if (this.content) {
-            if (Object.prototype.toString.call(this.content) === "[object Error]") {
-              return callback(this.content);
-            }
-            if (typeof this.content.pipe === "function") {
-              this.content.removeListener("error", this._contentErrorHandler);
-              this._contentErrorHandler = (err) => callback(err);
-              this.content.once("error", this._contentErrorHandler);
-            }
-            const createStream = () => {
-              if (["quoted-printable", "base64"].includes(transferEncoding)) {
-                contentStream = new (transferEncoding === "base64" ? base64_exports : qp_exports).Encoder(options);
-                contentStream.pipe(outputStream, {
-                  end: false
-                });
-                contentStream.once("end", finalize);
-                contentStream.once("error", (err) => callback(err));
-                localStream = this._getStream(this.content);
-                localStream.pipe(contentStream);
-              } else {
-                localStream = this._getStream(this.content);
-                localStream.pipe(outputStream, {
-                  end: false
-                });
-                localStream.once("end", finalize);
-              }
-              localStream.once("error", (err) => callback(err));
-            };
-            if (this.content._resolve) {
-              const chunks = [];
-              let chunklen = 0;
-              let returned2 = false;
-              const sourceStream = this._getStream(this.content);
-              sourceStream.on("error", (err) => {
-                if (returned2) {
-                  return;
-                }
-                returned2 = true;
-                callback(err);
-              });
-              sourceStream.on("readable", () => {
-                let chunk;
-                while ((chunk = sourceStream.read()) !== null) {
-                  chunks.push(chunk);
-                  chunklen += chunk.length;
-                }
-              });
-              sourceStream.on("end", () => {
-                if (returned2) {
-                  return;
-                }
-                returned2 = true;
-                this.content._resolve = false;
-                this.content._resolvedValue = Buffer.concat(chunks, chunklen);
-                setImmediate(createStream);
-              });
-            } else {
-              setImmediate(createStream);
-            }
+          if (aborted()) {
             return;
           }
-          return setImmediate(finalize);
+          if (!this.content) {
+            return setImmediate(finalize);
+          }
+          const createStream = () => {
+            if (aborted()) {
+              return;
+            }
+            const contentError = this._takeStreamContent(this.content);
+            if (contentError) {
+              return callback(contentError);
+            }
+            const localStream = this._getStream(this.content);
+            if (["quoted-printable", "base64"].includes(transferEncoding)) {
+              const contentStream = transferEncoding === "base64" ? new Encoder(options) : (
+                // outside of text a lone CR or LF is data, encoding it keeps it from being
+                // turned into a line break by a newline transform or the receiving side
+                new Encoder2(Object.assign({}, options, { binary: !/^text\//i.test(this.contentType || "") }))
+              );
+              readInto(localStream, contentStream);
+              contentStream.pipe(outputStream, {
+                end: false
+              });
+              pipeline(localStream, contentStream, (err) => err && callback(err));
+              finished2(contentStream, { writable: false }, (err) => err ? callback(err) : finalize());
+            } else {
+              readInto(localStream);
+              localStream.pipe(outputStream, {
+                end: false
+              });
+              finished2(localStream, { writable: false }, (err) => err ? callback(err) : finalize());
+            }
+          };
+          if (this.content._resolve) {
+            const sourceStream = this._getStream(this.content);
+            readInto(sourceStream);
+            resolveStream(sourceStream, (err, value) => {
+              if (err) {
+                return callback(err);
+              }
+              if (returned) {
+                return;
+              }
+              this.content._resolve = false;
+              this.content._resolvedValue = value;
+              setImmediate(createStream);
+            });
+          } else {
+            setImmediate(createStream);
+          }
         };
         if (this._raw) {
           setImmediate(() => {
-            if (Object.prototype.toString.call(this._raw) === "[object Error]") {
-              return callback(this._raw);
+            if (aborted()) {
+              return;
             }
-            if (typeof this._raw.pipe === "function") {
-              this._raw.removeListener("error", this._contentErrorHandler);
+            const rawError = this._takeStreamContent(this._raw);
+            if (rawError) {
+              return callback(rawError);
             }
             const raw2 = this._getStream(this._raw);
+            readInto(raw2);
             raw2.pipe(outputStream, {
               end: false
             });
-            raw2.on("error", (err) => outputStream.emit("error", err));
-            raw2.on("end", finalize);
+            finished2(raw2, { writable: false }, (err) => err ? callback(err) : finalize());
           });
         } else {
           outputStream.write(this.buildHeaders() + "\r\n\r\n");
@@ -17251,11 +17777,7 @@ var init_mime_node = __esm({
       setRaw(raw2) {
         this._raw = raw2;
         if (this._raw && typeof this._raw.pipe === "function") {
-          this._contentErrorHandler = (err) => {
-            this._raw.removeListener("error", this._contentErrorHandler);
-            this._raw = err;
-          };
-          this._raw.once("error", this._contentErrorHandler);
+          recordStreamErrors(this._raw);
         }
         return this;
       }
@@ -17279,6 +17801,36 @@ var init_mime_node = __esm({
           node = node.parentNode;
         }
         return false;
+      }
+      /**
+       * Destroys the content streams of this node and of every node below it
+       *
+       * @internal
+       */
+      _destroyContentStreams() {
+        destroyStream(this.content);
+        destroyStream(this._raw);
+        for (const child of this.childNodes) {
+          child._destroyContentStreams();
+        }
+      }
+      /**
+       * Checks that a content value can still be read before the node streams it. A stream is
+       * refused once it errored, ended or was destroyed: piping it would either never finish or
+       * produce an empty body without any error
+       *
+       * @param content Node content or raw value
+       * @returns The error to stop with, or null when the content can be read
+       * @internal
+       */
+      _takeStreamContent(content) {
+        if (Object.prototype.toString.call(content) === "[object Error]") {
+          return content;
+        }
+        if (!content || typeof content.pipe !== "function" || content._resolvedValue) {
+          return null;
+        }
+        return unreadableStreamError(content);
       }
       /**
        * Detects and returns handle to a stream related with the content.
@@ -17435,7 +17987,7 @@ var init_mime_node = __esm({
        * @internal
        */
       _normalizeHeaderKey(key) {
-        key = (key || "").toString().replace(/\r?\n|\r/g, " ").replace(/[\x00-\x1f\x7f]/g, "").trim().toLowerCase().replace(/^X-SMTPAPI$|^(MIME|DKIM|ARC|BIMI)\b|^[a-z]|-(SPF|FBL|ID|MD5)$|-[a-z]/gi, (c2) => c2.toUpperCase()).replace(/^Content-Features$/i, "Content-features");
+        key = (key || "").toString().replace(/[\s\x00-\x20\x7f:]/g, "").toLowerCase().replace(/^X-SMTPAPI$|^(MIME|DKIM|ARC|BIMI)\b|^[a-z]|-(SPF|FBL|ID|MD5)$|-[a-z]/gi, (c2) => c2.toUpperCase()).replace(/^Content-Features$/i, "Content-features");
         return key;
       }
       /**
@@ -17465,13 +18017,19 @@ var init_mime_node = __esm({
         return _stripBoundaryControls(this.rootNode.boundaryPrefix + "-" + this.rootNode.baseBoundary) + "-Part_" + this._nodeId;
       }
       /**
-       * Encodes a header value for use in the generated rfc2822 email.
+       * Encodes a header value the way this node encodes it in the generated message:
+       * address headers are punycoded and mime encoded, message id headers get their
+       * angle brackets, a Date object is formatted and any other value is mime encoded
+       * when it holds non-ascii or control characters (using the node's `textEncoding`).
        *
-       * @param key Header key
+       * The result is a single unfolded line without the key. Fold it before writing it
+       * into a message, `key + ': ' + value` folded at 76 characters is what the node does.
+       *
+       * @param key Header key, case insensitive
        * @param value Header value
-       * @internal
+       * @returns Encoded header value
        */
-      _encodeHeaderValue(key, value) {
+      encodeHeaderValue(key, value) {
         key = this._normalizeHeaderKey(key);
         switch (key) {
           // Structured headers
@@ -17495,20 +18053,22 @@ var init_mime_node = __esm({
             }
             return value;
           // space separated list of values enclosed in <>
-          case "References":
-            value = [].concat.apply([], [].concat(value || "").map((elm) => {
-              elm = (elm || "").toString().replace(/\r?\n|\r/g, " ").replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "").trim();
-              return elm.replace(/<[^>]*>/g, (str) => str.replace(/\s/g, "")).split(/\s+/);
-            })).map((elm) => {
-              if (elm.charAt(0) !== "<") {
-                elm = "<" + elm;
+          case "References": {
+            const ids = [];
+            for (const entry of [].concat(value || "")) {
+              const elm = (entry || "").toString().replace(/\r?\n|\r/g, " ").replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "").trim();
+              for (let id of stripWhitespaceInAngleBrackets(elm).split(/\s+/)) {
+                if (id.charAt(0) !== "<") {
+                  id = "<" + id;
+                }
+                if (id.charAt(id.length - 1) !== ">") {
+                  id = id + ">";
+                }
+                ids.push(id);
               }
-              if (elm.charAt(elm.length - 1) !== ">") {
-                elm = elm + ">";
-              }
-              return elm;
-            });
-            return value.join(" ").trim();
+            }
+            return ids.join(" ").trim();
+          }
           case "Date":
             if (Object.prototype.toString.call(value) === "[object Date]") {
               return value.toUTCString().replace(/GMT/, "+0000");
@@ -17522,6 +18082,27 @@ var init_mime_node = __esm({
             value = (value || "").toString().replace(/\r?\n|\r/g, " ");
             return this._encodeHeaderText(value);
         }
+      }
+      /**
+       * Encodes a header value without a node at hand. Same as the instance method of a
+       * node created with the given options.
+       *
+       * @param key Header key, case insensitive
+       * @param value Header value
+       * @param [options] Encoding options
+       * @param [options.textEncoding] either 'Q' (the default) or 'B'
+       * @returns Encoded header value
+       */
+      static encodeHeaderValue(key, value, options) {
+        return new _MimeNode(false, { textEncoding: options?.textEncoding }).encodeHeaderValue(key, value);
+      }
+      /**
+       * Alias of encodeHeaderValue, kept for callers that used the method before it was public
+       *
+       * @internal
+       */
+      _encodeHeaderValue(key, value) {
+        return this.encodeHeaderValue(key, value);
       }
       /**
        * Rebuilds address object using punycode and other adjustments
@@ -17572,7 +18153,8 @@ var init_mime_node = __esm({
         if (!address) {
           return address;
         }
-        const lastAt = address.lastIndexOf("@");
+        const literal = address.charAt(address.length - 1) === "]" ? DOMAIN_LITERAL_TAIL2.exec(address) : null;
+        const lastAt = literal ? address.length - literal[1].length - 1 : address.lastIndexOf("@");
         if (lastAt < 0) {
           return this._normalizeLocalPart(address);
         }
@@ -17695,6 +18277,32 @@ function isContentObject(value) {
   const content = value;
   return typeof value === "object" && !!(content.content || content.path || content.href || content.raw);
 }
+function fitsSevenBit(content) {
+  let at2;
+  let length;
+  if (typeof content === "string") {
+    at2 = (i2) => content.charCodeAt(i2);
+    length = content.length;
+  } else if (Buffer.isBuffer(content)) {
+    at2 = (i2) => content[i2];
+    length = content.length;
+  } else {
+    return false;
+  }
+  let lineLength = 0;
+  for (let i2 = 0; i2 < length; i2++) {
+    const c2 = at2(i2);
+    if (c2 === 0 || c2 > 127) {
+      return false;
+    }
+    if (c2 === 10 || c2 === 13) {
+      lineLength = 0;
+    } else if (++lineLength > 998) {
+      return false;
+    }
+  }
+  return true;
+}
 var MailComposer, mail_composer_default;
 var init_mail_composer = __esm({
   "node_modules/nodemailer/dist/esm/mail-composer/index.js"() {
@@ -17769,7 +18377,7 @@ var init_mail_composer = __esm({
           if ("contentTransferEncoding" in attachment) {
             contentTransferEncoding = attachment.contentTransferEncoding;
           } else if (isMessageNode) {
-            contentTransferEncoding = "8bit";
+            contentTransferEncoding = !attachment.encoding && fitsSevenBit(attachment.content) ? "7bit" : "8bit";
           } else {
             contentTransferEncoding = "base64";
           }
@@ -18269,7 +18877,7 @@ var init_message_parser = __esm({
           if (data.length > headerPos) {
             const chunk = data.slice(headerPos);
             this.bodySize += chunk.length;
-            setImmediate(() => this.push(chunk));
+            this.push(chunk);
           }
           return false;
         }
@@ -18296,7 +18904,7 @@ var init_message_parser = __esm({
           this.bodySize += chunk.length;
           this.push(chunk);
         }
-        setImmediate(callback);
+        callback();
       }
       /** @internal */
       _flush(callback) {
@@ -18575,50 +19183,64 @@ var init_dkim = __esm({
         this.output = output;
         this.output.usingCache = false;
         this.hasErrored = false;
-        this.input.on("error", (err) => {
+        this.input.on("error", (err) => this.fail(err));
+        this.output.once("close", () => {
+          if (this.output.writableFinished) {
+            return;
+          }
           this.hasErrored = true;
+          this.input.unpipe();
+          this.input.destroy();
           this.cleanup();
-          output.emit("error", err);
         });
+      }
+      /**
+       * Ends the output with an error and releases the cache file
+       */
+      fail(err) {
+        this.hasErrored = true;
+        this.cleanup();
+        this.output.destroy(err);
       }
       cleanup() {
         if (!this.cache || !this.cachePath) {
           return;
         }
+        const cache = this.cache;
+        this.cache = false;
+        cache.destroy();
         fs3.unlink(this.cachePath, () => false);
       }
       createReadCache() {
         this.cache = fs3.createReadStream(this.cachePath);
-        this.cache.once("error", (err) => {
-          this.cleanup();
-          this.output.emit("error", err);
-        });
+        this.cache.once("error", (err) => this.fail(err));
         this.cache.once("close", () => {
           this.cleanup();
         });
         this.cache.pipe(this.output);
       }
       sendNextChunk() {
+        while (!this.hasErrored) {
+          if (this.readPos >= this.chunks.length) {
+            if (!this.cache) {
+              this.output.end();
+              return;
+            }
+            return this.createReadCache();
+          }
+          const chunk = this.chunks[this.readPos++];
+          if (this.output.write(chunk) === false) {
+            this.output.once("drain", () => {
+              this.sendNextChunk();
+            });
+            return;
+          }
+        }
+      }
+      sendSignedOutput() {
         if (this.hasErrored) {
           return;
         }
-        if (this.readPos >= this.chunks.length) {
-          if (!this.cache) {
-            this.output.end();
-            return;
-          }
-          return this.createReadCache();
-        }
-        const chunk = this.chunks[this.readPos++];
-        if (this.output.write(chunk) === false) {
-          this.output.once("drain", () => {
-            this.sendNextChunk();
-          });
-          return;
-        }
-        setImmediate(() => this.sendNextChunk());
-      }
-      sendSignedOutput() {
         let keyPos = 0;
         const signNextKey = () => {
           if (keyPos >= this.keys.length) {
@@ -18637,9 +19259,7 @@ var init_dkim = __esm({
               skipFields: this.options.skipFields
             });
           } catch (err) {
-            this.hasErrored = true;
-            this.cleanup();
-            this.output.emit("error", err);
+            this.fail(err);
             return;
           }
           if (dkimField) {
@@ -18655,18 +19275,19 @@ var init_dkim = __esm({
       }
       createWriteCache() {
         this.output.usingCache = true;
-        this.cache = fs3.createWriteStream(this.cachePath);
+        this.cache = fs3.createWriteStream(this.cachePath, { mode: 384 });
         this.cache.once("error", (err) => {
-          this.cleanup();
           this.relaxedBody.unpipe(this.cache);
           this.relaxedBody.on("readable", () => {
             while (this.relaxedBody.read() !== null) {
             }
           });
-          this.hasErrored = true;
-          this.output.emit("error", err);
+          this.fail(err);
         });
         this.cache.once("close", () => {
+          if (this.hasErrored) {
+            return;
+          }
           this.sendSignedOutput();
         });
         this.relaxedBody.removeAllListeners("readable");
@@ -18736,7 +19357,7 @@ var init_dkim = __esm({
           try {
             signer.signStream();
           } catch (_E) {
-            output.emit("error", sign_default.unsupportedHashAlgoError(signer.hashAlgo));
+            signer.fail(sign_default.unsupportedHashAlgoError(signer.hashAlgo));
             return;
           }
           if (writeValue) {
@@ -18770,6 +19391,7 @@ function httpProxyClient(proxyUrl, destinationPort, destinationHost, tlsOptions,
     return;
   }
   const proxy = parse2(proxyUrl);
+  const authority = (net5.isIPv6(unbracket(destinationHost)) ? "[" + unbracket(destinationHost) + "]" : destinationHost) + ":" + destinationPort;
   const connectOptions = {
     host: proxy.hostname,
     port: Number(proxy.port) ? Number(proxy.port) : proxy.protocol === "https:" ? 443 : 80
@@ -18781,30 +19403,83 @@ function httpProxyClient(proxyUrl, destinationPort, destinationHost, tlsOptions,
   } else {
     connect = net5.connect.bind(net5);
   }
+  const timeout = Number(tlsOptions.timeout) || httpProxyClient.timeout || 30 * 1e3;
   let socket;
-  let finished = false;
-  const tempSocketErr = (err) => {
-    if (finished) {
+  let finished3 = false;
+  let timer;
+  const cleanup = () => {
+    clearTimeout(timer);
+    socket.removeListener("data", onSocketData);
+    socket.removeListener("error", fail);
+    socket.removeListener("close", onEarlyClose);
+  };
+  function fail(err) {
+    if (finished3) {
       return;
     }
-    finished = true;
+    finished3 = true;
+    cleanup();
     try {
       socket.destroy();
     } catch (_E) {
     }
     done(err);
-  };
-  const timeoutErr = () => {
-    const err = new Error("Proxy socket timed out");
-    err.code = "ETIMEDOUT";
-    tempSocketErr(err);
-  };
+  }
+  function onEarlyClose() {
+    const err = new Error("Proxy closed the connection before the tunnel was established");
+    err.code = EPROXY;
+    fail(err);
+  }
+  const chunks = [];
+  let received = 0;
+  let tail = "";
+  function onSocketData(chunk) {
+    if (finished3) {
+      return;
+    }
+    const window2 = tail + chunk.toString("binary");
+    const windowEnd = window2.indexOf("\r\n\r\n");
+    chunks.push(chunk);
+    received += chunk.length;
+    tail = window2.slice(-3);
+    if (windowEnd < 0) {
+      if (received > MAX_RESPONSE_HEADER_BYTES) {
+        const err = new Error("Proxy response headers too large");
+        err.code = EPROXY;
+        fail(err);
+      }
+      return;
+    }
+    socket.removeListener("data", onSocketData);
+    socket.pause();
+    const headerEnd = received - window2.length + windowEnd;
+    const response = Buffer.concat(chunks, received);
+    if (response.length > headerEnd + 4) {
+      socket.unshift(response.subarray(headerEnd + 4));
+    }
+    const match2 = response.toString("binary", 0, headerEnd).match(/^HTTP\/\d+\.\d+ (\d+)/i);
+    if (!match2 || (match2[1] || "").charAt(0) !== "2") {
+      const err = new Error("Invalid response from proxy" + (match2 && ": " + match2[1] || ""));
+      err.code = EPROXY;
+      return fail(err);
+    }
+    finished3 = true;
+    cleanup();
+    const resumeOnData = (event) => {
+      if (event === "data") {
+        socket.removeListener("newListener", resumeOnData);
+        socket.resume();
+      }
+    };
+    socket.on("newListener", resumeOnData);
+    return done(null, socket);
+  }
   socket = connect(connectOptions, () => {
-    if (finished) {
+    if (finished3) {
       return;
     }
     const reqHeaders = {
-      Host: destinationHost + ":" + destinationPort,
+      Host: authority,
       Connection: "close"
     };
     if (proxy.auth) {
@@ -18812,67 +19487,27 @@ function httpProxyClient(proxyUrl, destinationPort, destinationHost, tlsOptions,
     }
     socket.write(
       // HTTP method
-      "CONNECT " + destinationHost + ":" + destinationPort + " HTTP/1.1\r\n" + // HTTP request headers
+      "CONNECT " + authority + " HTTP/1.1\r\n" + // HTTP request headers
       Object.keys(reqHeaders).map((key) => key + ": " + reqHeaders[key]).join("\r\n") + // End request
       "\r\n\r\n"
     );
-    const chunks = [];
-    let received = 0;
-    let tail = "";
-    const onSocketData = (chunk) => {
-      let match2;
-      if (finished) {
-        return;
-      }
-      const window2 = tail + chunk.toString("binary");
-      const windowEnd = window2.indexOf("\r\n\r\n");
-      chunks.push(chunk);
-      received += chunk.length;
-      tail = window2.slice(-3);
-      if (windowEnd >= 0) {
-        socket.removeListener("data", onSocketData);
-        const headerEnd = received - window2.length + windowEnd;
-        const response = Buffer.concat(chunks, received).toString("binary");
-        const headers = response.substr(0, headerEnd);
-        const remainder = response.substr(headerEnd + 4);
-        if (remainder) {
-          socket.unshift(Buffer.from(remainder, "binary"));
-        }
-        finished = true;
-        match2 = headers.match(/^HTTP\/\d+\.\d+ (\d+)/i);
-        if (!match2 || (match2[1] || "").charAt(0) !== "2") {
-          try {
-            socket.destroy();
-          } catch (_E) {
-          }
-          const err = new Error("Invalid response from proxy" + (match2 && ": " + match2[1] || ""));
-          err.code = EPROXY;
-          return done(err);
-        }
-        socket.removeListener("error", tempSocketErr);
-        socket.removeListener("timeout", timeoutErr);
-        socket.setTimeout(0);
-        return done(null, socket);
-      }
-      if (received > MAX_RESPONSE_HEADER_BYTES) {
-        socket.removeListener("data", onSocketData);
-        const err = new Error("Proxy response headers too large");
-        err.code = EPROXY;
-        return tempSocketErr(err);
-      }
-    };
     socket.on("data", onSocketData);
   });
-  socket.setTimeout(httpProxyClient.timeout || 30 * 1e3);
-  socket.on("timeout", timeoutErr);
-  socket.once("error", tempSocketErr);
+  timer = setTimeout(() => {
+    const err = new Error("Proxy socket timed out");
+    err.code = ETIMEDOUT;
+    fail(err);
+  }, timeout);
+  socket.once("error", fail);
+  socket.once("close", onEarlyClose);
 }
-var MAX_RESPONSE_HEADER_BYTES, http_proxy_client_default;
+var MAX_RESPONSE_HEADER_BYTES, unbracket, http_proxy_client_default;
 var init_http_proxy_client = __esm({
   "node_modules/nodemailer/dist/esm/smtp-connection/http-proxy-client.js"() {
     init_url();
     init_errors3();
     MAX_RESPONSE_HEADER_BYTES = 64 * 1024;
+    unbracket = (host) => typeof host === "string" && host.startsWith("[") && host.endsWith("]") ? host.slice(1, -1) : host;
     http_proxy_client_default = httpProxyClient;
   }
 });
@@ -18993,6 +19628,28 @@ var init_mail_message = __esm({
         };
         setImmediate(() => resolveNext());
       }
+      /**
+       * Destroys the content streams of the message once sending failed. A stream that was not
+       * read to the end would otherwise keep the file or the socket behind it open
+       */
+      releaseStreams() {
+        const data = this.data;
+        const values = [data.html, data.text, data.watchHtml, data.amp, data.raw, data.icalEvent];
+        for (const key of ["attachments", "alternatives"]) {
+          if (Array.isArray(data[key])) {
+            for (const entry of data[key]) {
+              values.push(entry);
+            }
+          }
+        }
+        for (const value of values) {
+          if (value && typeof value === "object") {
+            destroyStream(value);
+            destroyStream(value.content);
+            destroyStream(value.raw);
+          }
+        }
+      }
       normalize(callback) {
         const envelope = this.message.getEnvelope();
         const messageId = this.message.messageId();
@@ -19040,7 +19697,7 @@ var init_mail_message = __esm({
             value = value && value.value || value;
             if (value) {
               if (["references", "in-reply-to", "message-id", "content-id"].includes(key)) {
-                value = this.message._encodeHeaderValue(key, value);
+                value = this.message.encodeHeaderValue(key, value);
               }
               data.normalizedHeaders[key] = value;
             }
@@ -19052,10 +19709,10 @@ var init_mail_message = __esm({
             });
           }
           if (data.references) {
-            data.normalizedHeaders.references = this.message._encodeHeaderValue("references", data.references);
+            data.normalizedHeaders.references = this.message.encodeHeaderValue("references", data.references);
           }
           if (data.inReplyTo) {
-            data.normalizedHeaders["in-reply-to"] = this.message._encodeHeaderValue("in-reply-to", data.inReplyTo);
+            data.normalizedHeaders["in-reply-to"] = this.message.encodeHeaderValue("in-reply-to", data.inReplyTo);
           }
           return callback(null, data);
         });
@@ -19241,6 +19898,10 @@ var init_mailer = __esm({
           this.getSocket = false;
         }
         const mail = new MailMessage(this, data);
+        const fail = (err) => {
+          mail.releaseStreams();
+          done(err);
+        };
         this.logger.debug({
           tnx: "transport",
           name: this.transporter.name,
@@ -19254,7 +19915,7 @@ var init_mailer = __esm({
               tnx: "plugin",
               action: "compile"
             }, "PluginCompile Error: %s", err.message);
-            return done(err);
+            return fail(err);
           }
           let recipientCount;
           try {
@@ -19269,7 +19930,7 @@ var init_mailer = __esm({
               tnx: "transport",
               action: "send"
             }, "Compile Error: %s", err2.message);
-            return done(err2);
+            return fail(err2);
           }
           const maxRecipients = mail.data.maxRecipients === void 0 ? DEFAULT_MAX_RECIPIENTS : mail.data.maxRecipients;
           if (maxRecipients && recipientCount > maxRecipients) {
@@ -19280,7 +19941,7 @@ var init_mailer = __esm({
               tnx: "transport",
               action: "send"
             }, "Send Error: %s", err2.message);
-            return done(err2);
+            return fail(err2);
           }
           this._processPlugins("stream", mail, (err2) => {
             if (err2) {
@@ -19289,7 +19950,7 @@ var init_mailer = __esm({
                 tnx: "plugin",
                 action: "stream"
               }, "PluginStream Error: %s", err2.message);
-              return done(err2);
+              return fail(err2);
             }
             if (mail.data.dkim || this.dkim) {
               mail.message.processFunc((input) => {
@@ -19304,6 +19965,7 @@ var init_mailer = __esm({
             }
             this.transporter.send(mail, (...args) => {
               if (args[0]) {
+                mail.releaseStreams();
                 this.logger.error({
                   err: args[0],
                   tnx: "transport",
@@ -19369,6 +20031,9 @@ var init_mailer = __esm({
         const proxy = parse2(proxyUrl);
         this.getSocket = (options, callback) => {
           const protocol = proxy.protocol.replace(/:$/, "").toLowerCase();
+          const configuredTimeout = Number(this.options.connectionTimeout) || 0;
+          const connectStartedAt = Number(options.connectStartedAt) || Date.now();
+          const connectionTimeout = configuredTimeout ? Math.max(connectStartedAt + configuredTimeout - Date.now(), 1) : void 0;
           if (this.meta.has("proxy_handler_" + protocol)) {
             return this.meta.get("proxy_handler_" + protocol)(proxy, options, callback);
           }
@@ -19376,7 +20041,7 @@ var init_mailer = __esm({
             // Connect using a HTTP CONNECT method
             case "http":
             case "https":
-              http_proxy_client_default(proxy.href, options.port, options.host, this.options.tls || {}, (err2, socket) => {
+              http_proxy_client_default(proxy.href, options.port, options.host, connectionTimeout ? Object.assign({}, this.options.tls, { timeout: connectionTimeout }) : this.options.tls || {}, (err2, socket) => {
                 if (err2) {
                   return callback(err2);
                 }
@@ -19410,6 +20075,9 @@ var init_mailer = __esm({
                   },
                   command: "connect"
                 };
+                if (connectionTimeout) {
+                  connectionOpts.timeout = connectionTimeout;
+                }
                 if (proxy.username || proxy.password) {
                   const username = proxy.username || "";
                   const password = proxy.password || "";
@@ -19437,11 +20105,11 @@ var init_mailer = __esm({
               if (net6.isIP(proxy.hostname)) {
                 return connect(proxy.hostname);
               }
-              return dns2.resolve(proxy.hostname, (err2, address) => {
+              return dns2.lookup(proxy.hostname, (err2, address) => {
                 if (err2) {
                   return callback(err2);
                 }
-                connect(Array.isArray(address) ? address[0] : address);
+                connect(address);
               });
             }
           }
@@ -19460,7 +20128,7 @@ var init_mailer = __esm({
             return callback(err);
           }
           let cidCounter = 0;
-          html = (html || "").toString().replace(/(<img\b[^<>]{0,1024} src\s{0,20}=[\s"']{0,20})(data:([^;]+);[^"'>\s]+)/gi, (match2, prefix, dataUri, mimeType) => {
+          html = (html || "").toString().replace(/(<img\b[^<>]{0,1024} src\s{0,20}=[\s"']{0,20})(data:([^;"'<>\s]{1,255});[^"'>\s]+)/gi, (match2, prefix, dataUri, mimeType) => {
             const cid = crypto7.randomBytes(10).toString("hex") + "@localhost";
             if (!mail.data.attachments) {
               mail.data.attachments = [];
@@ -19581,6 +20249,39 @@ var init_data_stream = __esm({
   }
 });
 
+// node_modules/nodemailer/dist/esm/smtp-connection/server-message-id.js
+function sesRegion(host) {
+  const labels = host.toLowerCase().replace(/\.$/, "").split(".");
+  const domain = labels.slice(-2).join(".");
+  if (domain !== "amazonaws.com" && domain !== "awsapps.com") {
+    return void 0;
+  }
+  return labels.slice(0, -2).find((label) => AWS_REGION.test(label));
+}
+function parseServerMessageId(response, host) {
+  const reply = (response || "").toString().trim();
+  const outlook = reply.match(OUTLOOK_REPLY);
+  if (outlook) {
+    return outlook[1];
+  }
+  const ses = reply.match(SES_REPLY);
+  if (ses && host) {
+    const region = sesRegion(host);
+    if (region) {
+      return "<" + ses[1].toLowerCase() + "@" + (region === "us-east-1" ? "email" : region) + ".amazonses.com>";
+    }
+  }
+  return void 0;
+}
+var OUTLOOK_REPLY, SES_REPLY, AWS_REGION;
+var init_server_message_id = __esm({
+  "node_modules/nodemailer/dist/esm/smtp-connection/server-message-id.js"() {
+    OUTLOOK_REPLY = /^250 2\.0\.0 OK (<[^<>\s]+\.prod\.outlook\.com>)/i;
+    SES_REPLY = /^250 Ok ([0-9a-f]+(?:-[0-9a-f]+)+)$/i;
+    AWS_REGION = /^[a-z]{2}(?:-[a-z]+)+-\d+$/;
+  }
+});
+
 // node_modules/nodemailer/dist/esm/smtp-connection/index.js
 import { EventEmitter as EventEmitter2 } from "node:events";
 import net7 from "node:net";
@@ -19588,6 +20289,19 @@ import tls2 from "node:tls";
 import os2 from "node:os";
 import crypto8 from "node:crypto";
 import { PassThrough as PassThrough4 } from "node:stream";
+function shuffle(list) {
+  const result = list.slice();
+  for (let i2 = result.length - 1; i2 > 0; i2--) {
+    const j2 = Math.floor(Math.random() * (i2 + 1));
+    [result[i2], result[j2]] = [result[j2], result[i2]];
+  }
+  return result;
+}
+function timeoutError(message, timeoutType) {
+  const err = new Error(message);
+  err.timeoutType = timeoutType;
+  return err;
+}
 function decodeServerResponse(str) {
   if (!str) {
     return str;
@@ -19601,16 +20315,27 @@ function isPartialResponse(str) {
 function isPartialLine(line2) {
   return /^\d+-/.test(line2);
 }
-var CONNECTION_TIMEOUT, SOCKET_TIMEOUT, GREETING_TIMEOUT, DNS_TIMEOUT, TEARDOWN_NOOP, MAX_RESPONSE_SIZE, SMTPConnection, smtp_connection_default;
+function maskAuthCommand(cmd) {
+  const match2 = (cmd || "").toString().match(/^AUTH\s+[^\s]+/i);
+  if (!match2) {
+    return "/* secret */";
+  }
+  return match2[0].length === cmd.length ? cmd : match2[0] + " /* secret */";
+}
+var CONNECTION_TIMEOUT, SOCKET_TIMEOUT, GREETING_TIMEOUT, DNS_TIMEOUT, CLOSE_TIMEOUT, KEEPALIVE_DELAY, TEARDOWN_NOOP, MAX_RESPONSE_SIZE, SMTPConnection, smtp_connection_default;
 var init_smtp_connection = __esm({
   "node_modules/nodemailer/dist/esm/smtp-connection/index.js"() {
     init_package_info();
     init_data_stream();
     init_shared();
+    init_server_message_id();
+    init_errors3();
     CONNECTION_TIMEOUT = 2 * 60 * 1e3;
     SOCKET_TIMEOUT = 10 * 60 * 1e3;
     GREETING_TIMEOUT = 30 * 1e3;
     DNS_TIMEOUT = 30 * 1e3;
+    CLOSE_TIMEOUT = 5 * 1e3;
+    KEEPALIVE_DELAY = 30 * 1e3;
     TEARDOWN_NOOP = () => {
     };
     MAX_RESPONSE_SIZE = 1024 * 1024;
@@ -19660,8 +20385,8 @@ var init_smtp_connection = __esm({
         this._maxAllowedSize = 0;
         this._responseActions = [];
         this._recipientQueue = [];
-        this._greetingTimeout = false;
-        this._connectionTimeout = false;
+        this._phaseTimer = false;
+        this._plaintextEhlo = false;
         this._destroyed = false;
         this._closing = false;
         this._currentDataStream = false;
@@ -19672,14 +20397,23 @@ var init_smtp_connection = __esm({
         this._onSocketClose = () => this._onClose();
         this._onSocketEnd = () => this._onEnd();
         this._onSocketTimeout = () => this._onTimeout();
-        this._onConnectionSocketError = (err) => this._onConnectionError(err, "ESOCKET");
-        this._connectionAttemptId = 0;
+        this._onConnectionSocketError = (err) => this._onError(err, "ESOCKET", false, "CONN");
       }
       /**
        * Creates a connection to a SMTP server and sets up connection
        * listener
        */
       connect(connectCallback) {
+        if (this._connectCalled && !this._destroyed) {
+          const err = this._formatError("Cannot connect - connect() was already called for this connection", "ECONNECTION", false, "API");
+          if (typeof connectCallback === "function") {
+            setImmediate(() => connectCallback(err));
+            return;
+          }
+          this.logger.warn({ tnx: "smtp" }, "%s", err.message);
+          return;
+        }
+        this._connectCalled = true;
         if (typeof connectCallback === "function") {
           this._connectCallback = connectCallback;
           this.once("connect", () => {
@@ -19694,11 +20428,13 @@ var init_smtp_connection = __esm({
             return connectCallback(this._formatError(isDestroyedMessage, "ECONNECTION", false, "CONN"));
           }
         }
+        const connectionTimeout = this.options.connectionTimeout || CONNECTION_TIMEOUT;
+        this._connectionDeadline = (this._connectStartedAt || Date.now()) + connectionTimeout;
         let opts = {
           port: this.port,
           host: this.host,
           allowInternalNetworkInterfaces: this.allowInternalNetworkInterfaces,
-          timeout: this.options.dnsTimeout || DNS_TIMEOUT
+          timeout: Math.min(this.options.dnsTimeout || DNS_TIMEOUT, connectionTimeout)
         };
         if (this.options.localAddress) {
           opts.localAddress = this.options.localAddress;
@@ -19723,7 +20459,6 @@ var init_smtp_connection = __esm({
           return this._resolveAndConnect(opts, (_resolved) => {
             try {
               this._socket.connect(this.port, this.host, () => {
-                this._socket.setKeepAlive(true);
                 if (this.secureConnection && !this.alreadySecured) {
                   return this._upgradeConnection((err) => {
                     if (err) {
@@ -19749,8 +20484,32 @@ var init_smtp_connection = __esm({
             }
           }
           return this._resolveAndConnect(opts, (resolved) => {
-            this._fallbackAddresses = (resolved._addresses || []).filter((addr) => addr !== opts.host);
-            this._connectOpts = Object.assign({}, opts);
+            let addresses = resolved._addresses || [];
+            if (opts.localAddress) {
+              const localFamily = net7.isIPv6(opts.localAddress) ? 6 : 4;
+              const sameFamily = addresses.filter((addr) => net7.isIP(addr) === localFamily);
+              addresses = sameFamily.length ? sameFamily : addresses;
+            }
+            if (addresses.length > 1) {
+              const ipv6 = addresses.filter((addr) => net7.isIPv6(addr));
+              const ipv4 = addresses.filter((addr) => !net7.isIPv6(addr));
+              const ordered = shuffle(ipv6).concat(shuffle(ipv4));
+              opts.host = this.host;
+              opts.autoSelectFamily = true;
+              if (!ipv6.length || !ipv4.length) {
+                const remaining = this._connectionDeadline - Date.now();
+                opts.autoSelectFamilyAttemptTimeout = Math.max(Math.floor(remaining / ordered.length), 10);
+              }
+              opts.lookup = ((hostname, lookupOptions, callback) => {
+                if (lookupOptions && lookupOptions.all) {
+                  const all = ordered.map((address) => ({ address, family: net7.isIPv6(address) ? 6 : 4 }));
+                  return setImmediate(() => callback(null, all));
+                }
+                setImmediate(() => callback(null, ordered[0], net7.isIPv6(ordered[0]) ? 6 : 4));
+              });
+            } else if (addresses.length) {
+              opts.host = addresses[0];
+            }
             this._connectToHost(opts, this.secureConnection);
           });
         }
@@ -19793,17 +20552,9 @@ var init_smtp_connection = __esm({
         if (this._destroyed || this._closing) {
           return;
         }
-        this._connectionAttemptId++;
-        const currentAttemptId = this._connectionAttemptId;
         const connectFn = secure ? tls2.connect : net7.connect;
         try {
-          this._socket = connectFn(opts, () => {
-            if (this._connectionAttemptId !== currentAttemptId) {
-              return;
-            }
-            this._socket.setKeepAlive(true);
-            this._onConnect();
-          });
+          this._socket = connectFn(opts, () => this._onConnect());
           this._setupConnectionHandlers();
         } catch (E2) {
           setImmediate(() => this._onError(E2, "ECONNECTION", false, "CONN"));
@@ -19815,43 +20566,37 @@ var init_smtp_connection = __esm({
        * @internal
        */
       _setupConnectionHandlers() {
-        this._connectionTimeout = setTimeout(() => {
-          this._onConnectionError("Connection timeout", "ETIMEDOUT");
-        }, this.options.connectionTimeout || CONNECTION_TIMEOUT);
+        this._startPhase(Math.max((this._connectionDeadline || Date.now()) - Date.now(), 0), timeoutError("Connection timeout", "CONNECT_TIMEOUT"));
         this._socket.on("error", this._onConnectionSocketError);
       }
       /**
-       * Handles connection errors with fallback to alternative addresses
+       * Starts the timer of a connection phase: connecting, waiting for the greeting or a TLS
+       * upgrade. The phases follow one another, so starting one ends the one before
        *
-       * @param err Error object or message
-       * @param code Error code
+       * @param timeout Time the phase may take
+       * @param err Error to fail with when it takes longer
        * @internal
        */
-      _onConnectionError(err, code) {
-        clearTimeout(this._connectionTimeout);
-        const canFallback = this._fallbackAddresses && this._fallbackAddresses.length && this.stage === "init" && !this._destroyed;
-        if (!canFallback) {
-          this._onError(err, code, false, "CONN");
-          return;
-        }
-        const nextHost = this._fallbackAddresses.shift();
-        this.logger.info({
-          tnx: "network",
-          failedHost: this._connectOpts.host,
-          nextHost,
-          error: err.message || err
-        }, "Connection to %s failed, trying %s", this._connectOpts.host, nextHost);
-        if (this._socket) {
-          try {
-            this._socket.removeListener("error", this._onConnectionSocketError);
-            this._socket.on("error", TEARDOWN_NOOP);
-            this._socket.destroy();
-          } catch (_E) {
-          }
-          this._socket = null;
-        }
-        this._connectOpts.host = nextHost;
-        this._connectToHost(this._connectOpts, this.secureConnection);
+      _startPhase(timeout, err) {
+        this._clearPhase();
+        this._phaseTimer = setTimeout(() => {
+          this._phaseTimer = false;
+          this._onError(err, "ETIMEDOUT", false, "CONN");
+        }, timeout);
+      }
+      /**
+       * Time the greeting or a STARTTLS upgrade may take: greetingTimeout, cut short by what is left
+       * of connectionTimeout
+       *
+       * @internal
+       */
+      _remainingSetupTime() {
+        return Math.min(this.options.greetingTimeout || GREETING_TIMEOUT, Math.max((this._connectionDeadline || Infinity) - Date.now(), 1));
+      }
+      /** @internal */
+      _clearPhase() {
+        clearTimeout(this._phaseTimer);
+        this._phaseTimer = false;
       }
       /**
        * Sends QUIT
@@ -19864,8 +20609,7 @@ var init_smtp_connection = __esm({
        * Closes the connection to the server
        */
       close() {
-        clearTimeout(this._connectionTimeout);
-        clearTimeout(this._greetingTimeout);
+        this._clearPhase();
         this._responseActions = [];
         if (this._closing) {
           return;
@@ -19888,6 +20632,7 @@ var init_smtp_connection = __esm({
           if (stream) {
             stream.removeListener("error", onStreamError);
             stream.on("error", TEARDOWN_NOOP);
+            stream.destroy();
           }
           this._pendingSend = false;
         }
@@ -19902,6 +20647,13 @@ var init_smtp_connection = __esm({
             socket.removeListener("error", this._onConnectionSocketError);
             socket.on("error", TEARDOWN_NOOP);
             socket[closeMethod]();
+            if (closeMethod === "end") {
+              const closeTimer = setTimeout(() => socket.destroy(), CLOSE_TIMEOUT);
+              if (typeof closeTimer.unref === "function") {
+                closeTimer.unref();
+              }
+              socket.once("close", () => clearTimeout(closeTimer));
+            }
           } catch (_E) {
           }
         }
@@ -19986,7 +20738,7 @@ var init_smtp_connection = __esm({
               }
               done(null, data);
             });
-            setImmediate(() => this._sendCommand(cmd));
+            setImmediate(() => this._sendCommand(cmd, maskAuthCommand(cmd)));
             return promise;
           };
           const handlerResponse = handler({
@@ -20088,12 +20840,8 @@ var init_smtp_connection = __esm({
         const startTime = Date.now();
         this._setEnvelope(envelope, (err, info) => {
           if (err) {
-            const stream2 = new PassThrough4();
-            if (typeof message.pipe === "function") {
-              message.pipe(stream2);
-            } else {
-              stream2.write(message);
-              stream2.end();
+            if (typeof message.destroy === "function") {
+              message.destroy();
             }
             return callback(err);
           }
@@ -20107,6 +20855,14 @@ var init_smtp_connection = __esm({
             result.messageTime = Date.now() - envelopeTime;
             result.messageSize = stream.outByteCount;
             result.response = str;
+            const serverMessageId = parseServerMessageId(result.response, this.options.host);
+            if (serverMessageId) {
+              result.serverMessageId = serverMessageId;
+            }
+            const rejectedErrors = this._envelope?.rejectedErrors;
+            if (!result.rejectedErrors && rejectedErrors && rejectedErrors.length) {
+              result.rejectedErrors = rejectedErrors;
+            }
             return callback(null, result);
           });
           if (typeof message.pipe === "function") {
@@ -20145,7 +20901,7 @@ var init_smtp_connection = __esm({
        */
       _onConnect() {
         const socket = this._socket;
-        clearTimeout(this._connectionTimeout);
+        this._clearPhase();
         this.logger.info({
           tnx: "network",
           localAddress: socket.localAddress,
@@ -20170,13 +20926,34 @@ var init_smtp_connection = __esm({
         socket.once("end", this._onSocketEnd);
         socket.setTimeout(this.options.socketTimeout || SOCKET_TIMEOUT);
         socket.on("timeout", this._onSocketTimeout);
-        this._greetingTimeout = setTimeout(() => {
-          if (this._socket && !this._destroyed && this._responseActions[0] === this._actionGreeting) {
-            this._onError("Greeting never received", "ETIMEDOUT", false, "CONN");
-          }
-        }, this.options.greetingTimeout || GREETING_TIMEOUT);
+        if (typeof socket.setKeepAlive === "function") {
+          socket.setKeepAlive(true, KEEPALIVE_DELAY);
+        }
+        if (typeof socket.setNoDelay === "function") {
+          socket.setNoDelay(true);
+        }
+        this._startPhase(this._remainingSetupTime(), timeoutError("Greeting never received", "GREETING_TIMEOUT"));
         this._responseActions.push(this._actionGreeting);
         socket.resume();
+      }
+      /**
+       * Ends the session after a 421 reply. The replies queued for commands sent along with the
+       * answered one are not going to come, so the message in flight is failed here
+       *
+       * @param str The 421 reply
+       * @internal
+       */
+      _onServerClosing(str) {
+        if (this._destroyed) {
+          return;
+        }
+        const pendingSend = this._pendingSend;
+        const envelope = this._envelope;
+        this._responseActions = [];
+        this.close();
+        if (pendingSend) {
+          pendingSend.callback(envelope && envelope.mailError || this._formatError("Server closed the connection", "ECONNECTION", str, "CONN"));
+        }
       }
       /**
        * 'data' listener for data coming from the server
@@ -20241,17 +21018,15 @@ var init_smtp_connection = __esm({
        * @internal
        */
       _onError(err, type, data, command) {
-        clearTimeout(this._connectionTimeout);
-        clearTimeout(this._greetingTimeout);
+        this._clearPhase();
         if (this._destroyed) {
           return;
         }
         err = this._formatError(err, type, data, command);
-        const transientCodes = ["ETIMEDOUT", "ESOCKET", "ECONNECTION"];
-        if (transientCodes.includes(err.code)) {
-          this.logger.warn(data, err.message);
+        if (isTransientError(err)) {
+          this.logger.warn({ tnx: "smtp", err }, "%s", err.message);
         } else {
-          this.logger.error(data, err.message);
+          this.logger.error({ tnx: "smtp", err }, "%s", err.message);
         }
         const pendingSend = this._pendingSend;
         this.emit("error", err);
@@ -20268,7 +21043,10 @@ var init_smtp_connection = __esm({
         } else {
           err = new Error(message);
         }
-        if (type && type !== "Error") {
+        if (type && type !== "Error" && err.code !== ERR_ACCESS_DENIED) {
+          if (err.code && err.code !== type && !err.originalCode) {
+            err.originalCode = err.code;
+          }
           err.code = type;
         }
         if (response) {
@@ -20278,6 +21056,7 @@ var init_smtp_connection = __esm({
         const responseCode = typeof response === "string" && Number((response.match(/^\d+/) || [])[0]) || false;
         if (responseCode) {
           err.responseCode = responseCode;
+          err.permanent = isPermanentResponseCode(responseCode);
         }
         if (command) {
           err.command = command;
@@ -20316,6 +21095,12 @@ var init_smtp_connection = __esm({
           this.close();
           return;
         }
+        if (!failureResponse && this.stage === "connected" && !this._responseActions.length && !this._pendingSend && !this._destroyed && !this._closing) {
+          this.logger.info({
+            tnx: "network"
+          }, "Server closed the idle connection");
+          return this._destroy();
+        }
         if (failureResponse || this._responseActions[0] !== this.close && !this._destroyed) {
           return this._onError(new Error("Connection closed unexpectedly"), "ECONNECTION", failureResponse, "CONN");
         }
@@ -20339,7 +21124,7 @@ var init_smtp_connection = __esm({
        * @internal
        */
       _onTimeout() {
-        return this._onError(new Error("Timeout"), "ETIMEDOUT", false, "CONN");
+        return this._onError(timeoutError("Timeout", "SOCKET_TIMEOUT"), "ETIMEDOUT", false, "CONN");
       }
       /**
        * Destroys the client, emits 'end'
@@ -20351,10 +21136,7 @@ var init_smtp_connection = __esm({
         }
         this._destroyed = true;
         this.destroyed = true;
-        clearTimeout(this._connectionTimeout);
-        clearTimeout(this._greetingTimeout);
-        this._connectionTimeout = false;
-        this._greetingTimeout = false;
+        this._clearPhase();
         this.emit("end");
       }
       /**
@@ -20365,12 +21147,21 @@ var init_smtp_connection = __esm({
        * @internal
        */
       _upgradeConnection(callback) {
+        const discarded = this._remainder.length + this._responseQueue.reduce((total, response) => total + response.length, 0);
+        if (discarded) {
+          this.logger.warn({
+            tnx: "smtp",
+            discarded
+          }, "Discarded %s bytes received in plaintext after the STARTTLS response", discarded);
+        }
+        this._plaintextEhlo = false;
         this._remainder = "";
         this._responseQueue = [];
         this._responsePartial = false;
         const socketPlain = this._socket;
         socketPlain.removeListener("data", this._onSocketData);
         socketPlain.removeListener("timeout", this._onSocketTimeout);
+        socketPlain.setTimeout(0);
         const opts = Object.assign({
           socket: socketPlain,
           host: this.host
@@ -20385,8 +21176,10 @@ var init_smtp_connection = __esm({
           socketPlain.removeListener("error", this._onConnectionSocketError);
         };
         this.upgrading = true;
+        this._startPhase(this._remainingSetupTime(), timeoutError("TLS handshake timed out", "UPGRADE_TIMEOUT"));
         try {
           this._socket = tls2.connect(opts, () => {
+            this._clearPhase();
             this.secure = true;
             this.upgrading = false;
             this._socket.on("data", this._onSocketData);
@@ -20394,6 +21187,7 @@ var init_smtp_connection = __esm({
             return callback(null, true);
           });
         } catch (err) {
+          this._clearPhase();
           removePlainSocketListeners();
           return callback(err);
         }
@@ -20428,9 +21222,18 @@ var init_smtp_connection = __esm({
           }, str.replace(/\r?\n$/, ""));
         }
         const action = this._responseActions.shift();
+        const closing = /^421[ -]/.test(str);
         if (typeof action === "function") {
           action.call(this, str);
+          if (closing) {
+            return this._onServerClosing(str);
+          }
           setImmediate(() => this._processResponse());
+        } else if (closing && !this._pendingSend && this.stage === "connected") {
+          this.logger.info({
+            tnx: "smtp"
+          }, "Server closed the idle connection: %s", str);
+          this.close();
         } else {
           return this._onError(new Error("Unexpected Response"), "EPROTOCOL", str, "CONN");
         }
@@ -20510,6 +21313,7 @@ var init_smtp_connection = __esm({
             return callback(this._formatError("Server does not support REQUIRETLS extension (RFC 8689)", "EREQUIRETLS", false, "MAIL FROM"));
           }
         }
+        this._envelope.pipelined = this._supportedExtensions.includes("PIPELINING");
         this._responseActions.push((str) => {
           this._actionMAIL(str, callback);
         });
@@ -20538,7 +21342,37 @@ var init_smtp_connection = __esm({
         if (this._envelope.requireTLSExtensionEnabled) {
           args.push("REQUIRETLS");
         }
-        this._sendCommand("MAIL FROM:<" + this._envelope.from + ">" + (args.length ? " " + args.join(" ") : ""));
+        const mailFrom = "MAIL FROM:<" + this._envelope.from + ">" + (args.length ? " " + args.join(" ") : "");
+        this._recipientQueue = [];
+        if (!this._envelope.pipelined) {
+          this._sendCommand(mailFrom);
+          return;
+        }
+        const socket = this._socket;
+        socket.cork();
+        this._sendCommand(mailFrom);
+        while (this._envelope.rcptQueue.length) {
+          this._sendRcpt(this._envelope.rcptQueue.shift(), callback);
+        }
+        this._responseActions.push((str) => {
+          this._actionDATA(str, callback);
+        });
+        this._sendCommand("DATA");
+        socket.uncork();
+      }
+      /**
+       * Sends RCPT TO for a recipient and queues the handler for the reply
+       *
+       * @param recipient Recipient address
+       * @param callback Callback to run once the envelope is processed
+       * @internal
+       */
+      _sendRcpt(recipient, callback) {
+        this._recipientQueue.push(recipient);
+        this._responseActions.push((str) => {
+          this._actionRCPT(str, callback);
+        });
+        this._sendCommand("RCPT TO:<" + recipient + ">" + this._getDsnRcptToArgs());
       }
       /** @internal */
       _setDsnEnvelope(params) {
@@ -20651,7 +21485,7 @@ var init_smtp_connection = __esm({
        * @internal
        */
       _actionGreeting(str) {
-        clearTimeout(this._greetingTimeout);
+        this._clearPhase();
         if (str.substr(0, 3) !== "220") {
           this._onError(new Error("Invalid greeting. response=" + str), "EPROTOCOL", str, "CONN");
           return;
@@ -20688,7 +21522,6 @@ var init_smtp_connection = __esm({
        * @internal
        */
       _actionEHLO(str) {
-        let match2;
         if (str.substr(0, 3) === "421") {
           this._onError(new Error("Server terminates connection. response=" + str), "ECONNECTION", str, "EHLO");
           return;
@@ -20702,12 +21535,24 @@ var init_smtp_connection = __esm({
           this._sendCommand("HELO " + this.name);
           return;
         }
-        this._ehloLines = str.split(/\r?\n/).map((line2) => line2.replace(/^\d+[ -]/, "").trim()).filter((line2) => line2).slice(1);
         if (!this.secure && !this.options.ignoreTLS && (/[ -]STARTTLS\b/im.test(str) || this.options.requireTLS)) {
+          this._plaintextEhlo = str;
           this._sendCommand("STARTTLS");
           this._responseActions.push(this._actionSTARTTLS);
           return;
         }
+        this._parseEhloExtensions(str);
+        this.emit("connect");
+      }
+      /**
+       * Reads the extensions and the authentication mechanisms out of an EHLO response
+       *
+       * @param str EHLO response from the server
+       * @internal
+       */
+      _parseEhloExtensions(str) {
+        let match2;
+        this._ehloLines = str.split(/\r?\n/).map((line2) => line2.replace(/^\d+[ -]/, "").trim()).filter((line2) => line2).slice(1);
         if (/[ -]SMTPUTF8\b/im.test(str)) {
           this._supportedExtensions.push("SMTPUTF8");
         }
@@ -20744,7 +21589,6 @@ var init_smtp_connection = __esm({
           this._supportedExtensions.push("SIZE");
           this._maxAllowedSize = Number(match2[1]) || 0;
         }
-        this.emit("connect");
       }
       /**
        * Handles server response for HELO command. If it yielded in
@@ -20775,6 +21619,12 @@ var init_smtp_connection = __esm({
             this.logger.info({
               tnx: "smtp"
             }, "Failed STARTTLS upgrade, continuing unencrypted");
+            if (this._plaintextEhlo) {
+              this._parseEhloExtensions(this._plaintextEhlo);
+              this._plaintextEhlo = false;
+              this.allowsAuth = false;
+              this._supportedAuth = [];
+            }
             this.emit("connect");
             return;
           }
@@ -20949,21 +21799,9 @@ var init_smtp_connection = __esm({
         const envelope = this._envelope;
         if (Number(str.charAt(0)) !== 2) {
           const message = this._usingSmtpUtf8 && /^550 /.test(str) && /[\x80-\uFFFF]/.test(envelope.from) ? "Internationalized mailbox name not allowed" : "Mail command failed";
-          return callback(this._formatError(message, "EENVELOPE", str, "MAIL FROM"));
+          envelope.mailError = this._formatError(message, "EENVELOPE", str, "MAIL FROM");
         }
-        if (!envelope.rcptQueue.length) {
-          return callback(this._formatError("Can't send mail - no recipients defined", "EENVELOPE", false, "API"));
-        }
-        this._recipientQueue = [];
-        const usePipelining = this._supportedExtensions.includes("PIPELINING");
-        do {
-          const curRecipient = envelope.rcptQueue.shift();
-          this._recipientQueue.push(curRecipient);
-          this._responseActions.push((str2) => {
-            this._actionRCPT(str2, callback);
-          });
-          this._sendCommand("RCPT TO:<" + curRecipient + ">" + this._getDsnRcptToArgs());
-        } while (usePipelining && envelope.rcptQueue.length);
+        this._advanceEnvelope(str, callback);
       }
       /**
        * Handle response for a RCPT TO: command
@@ -20985,28 +21823,63 @@ var init_smtp_connection = __esm({
         } else {
           envelope.accepted.push(curRecipient);
         }
-        if (!envelope.rcptQueue.length && !this._recipientQueue.length) {
-          if (envelope.rejected.length < envelope.to.length) {
-            this._responseActions.push((str2) => {
-              this._actionDATA(str2, callback);
-            });
-            this._sendCommand("DATA");
-          } else {
-            const deferred = envelope.rejectedErrors.find((rejectedErr) => rejectedErr.responseCode && rejectedErr.responseCode < 500);
-            const reply = deferred?.response ?? str;
-            err = this._formatError("Can't send mail - all recipients were rejected", "EENVELOPE", reply, "RCPT TO");
-            err.rejected = envelope.rejected;
-            err.rejectedErrors = envelope.rejectedErrors;
-            return callback(err);
-          }
-        } else if (envelope.rcptQueue.length) {
-          const nextRecipient = envelope.rcptQueue.shift();
-          this._recipientQueue.push(nextRecipient);
-          this._responseActions.push((str2) => {
-            this._actionRCPT(str2, callback);
-          });
-          this._sendCommand("RCPT TO:<" + nextRecipient + ">" + this._getDsnRcptToArgs());
+        this._advanceEnvelope(str, callback);
+      }
+      /**
+       * Moves the envelope on after a reply to MAIL FROM or RCPT TO. A pipelined envelope sent every
+       * command at once and is decided by the reply to DATA. Otherwise the commands go one at a
+       * time: the next recipient, or once every reply is in, DATA or the error that ends the message
+       *
+       * @param str The reply that was handled
+       * @param callback Callback to run once the envelope is processed
+       * @internal
+       */
+      _advanceEnvelope(str, callback) {
+        const envelope = this._envelope;
+        if (envelope.pipelined) {
+          return;
         }
+        if (envelope.mailError) {
+          return callback(envelope.mailError);
+        }
+        if (envelope.rcptQueue.length) {
+          return this._sendRcpt(envelope.rcptQueue.shift(), callback);
+        }
+        if (this._recipientQueue.length) {
+          return;
+        }
+        const err = this._envelopeError(str);
+        if (err) {
+          return callback(err);
+        }
+        this._responseActions.push((str2) => {
+          this._actionDATA(str2, callback);
+        });
+        this._sendCommand("DATA");
+      }
+      /**
+       * Decides how the envelope went once every reply to MAIL FROM and RCPT TO is in. Called after
+       * the last RCPT TO reply, or with PIPELINING on the reply to the DATA command sent along
+       *
+       * @param str The reply being handled
+       * @returns The error to fail the message with, or null when DATA can go ahead
+       * @internal
+       */
+      _envelopeError(str) {
+        const envelope = this._envelope;
+        if (envelope.mailError) {
+          return envelope.mailError;
+        }
+        if (envelope.accepted.length) {
+          return null;
+        }
+        const deferred = envelope.rejectedErrors.find((rejectedErr) => rejectedErr.responseCode && rejectedErr.responseCode < 500);
+        const lastRejected = envelope.rejectedErrors[envelope.rejectedErrors.length - 1];
+        const reply = deferred?.response ?? (envelope.pipelined && lastRejected ? lastRejected.response : str);
+        const err = this._formatError("Can't send mail - all recipients were rejected", "EENVELOPE", reply, "RCPT TO");
+        err.rejected = envelope.rejected;
+        err.rejectedErrors = envelope.rejectedErrors;
+        return err;
       }
       /**
        * Handle response for a DATA command
@@ -21017,6 +21890,21 @@ var init_smtp_connection = __esm({
        */
       _actionDATA(str, callback) {
         const envelope = this._envelope;
+        if (envelope.pipelined) {
+          const err = this._envelopeError(str);
+          if (err) {
+            if (/^3/.test(str)) {
+              if (envelope.mailError) {
+                this.close();
+                return callback(err);
+              }
+              this._responseActions.push(() => callback(err));
+              this._sendCommand(".");
+              return;
+            }
+            return callback(err);
+          }
+        }
         if (!/^[23]/.test(str)) {
           return callback(this._formatError("Data command failed", "EENVELOPE", str, "DATA"));
         }
@@ -21324,8 +22212,12 @@ var init_xoauth2 = __esm({
             grant_type: "refresh_token"
           };
         }
-        Object.assign(urlOptions, this.options.customParams);
-        Object.assign(loggedUrlOptions, this.options.customParams);
+        const customParams = this.options.customParams || {};
+        Object.assign(urlOptions, customParams);
+        for (const key of Object.keys(customParams)) {
+          const param = customParams[key];
+          loggedUrlOptions[key] = (param === void 0 || param === null ? "" : String(param)).substr(0, 6) + "...";
+        }
         this.logger.debug({
           tnx: "OAUTH2",
           user: this.options.user,
@@ -21522,6 +22414,8 @@ var init_pool_resource = __esm({
         this.messages = 0;
         this.available = true;
         this._failed = false;
+        this._sending = false;
+        this._idleTimer = false;
       }
       /**
        * Emits 'error' for the first failure only. A dead resource can report the same failure more
@@ -21541,7 +22435,8 @@ var init_pool_resource = __esm({
        * @param callback Callback function to run once the connection is established or failed
        */
       connect(callback) {
-        this.pool.getSocket(this.options, (err, socketOptions) => {
+        const connectStartedAt = Date.now();
+        this.pool.getSocket(Object.assign({}, this.options, { connectStartedAt }), (err, socketOptions) => {
           if (err) {
             this._fail(err);
             return callback(err);
@@ -21560,7 +22455,18 @@ var init_pool_resource = __esm({
             options = Object.assign(assign(false, options), socketOptions);
           }
           this.connection = new smtp_connection_default(options);
+          this.connection._connectStartedAt = connectStartedAt;
           this.connection.on("error", (err2) => {
+            if (this._sending) {
+              return;
+            }
+            if (this._connected && isTransientError(err2)) {
+              this.logger.info({
+                tnx: "pool",
+                cid: this.id
+              }, "Connection #%s was closed by the server: %s", this.id, err2.message);
+              return;
+            }
             this._fail(err2);
             if (returned) {
               return;
@@ -21634,9 +22540,32 @@ var init_pool_resource = __esm({
         if (mail.data.requireTLSExtensionEnabled) {
           envelope.requireTLSExtensionEnabled = mail.data.requireTLSExtensionEnabled;
         }
-        this.connection.send(envelope, mail.message.createReadStream(), (err, info) => {
+        this._sending = true;
+        const reused = this.messages > 0;
+        const messageStream = mail.message.createReadStream();
+        this.connection.send(envelope, messageStream, (err, info) => {
+          this._sending = false;
           this.messages++;
           if (err) {
+            if (reused && messageStream.readableDidRead === false && isTransientError(err)) {
+              this.logger.info({
+                tnx: "pool",
+                cid: this.id,
+                messageId
+              }, "Connection #%s was closed by the server before message %s was sent: %s", this.id, messageId, err.message);
+              this.connection.close();
+              return;
+            }
+            if ((err.code === EENVELOPE || err.code === EMESSAGE) && err.responseCode !== 421 && !this.connection._destroyed) {
+              this.connection.reset((resetErr) => {
+                if (resetErr) {
+                  this.connection.close();
+                  return;
+                }
+                this._release();
+              });
+              return callback(err);
+            }
             this.connection.close();
             this._fail(err);
             return callback(err);
@@ -21646,27 +22575,66 @@ var init_pool_resource = __esm({
             to: envelope.to
           };
           info.messageId = messageId;
-          setImmediate(() => {
-            if (this.messages >= this.options.maxMessages) {
-              const err2 = new Error("Resource exhausted");
-              err2.code = EMAXLIMIT;
-              this.connection.close();
-              this._fail(err2);
-            } else {
-              this.pool._checkRateLimit(() => {
-                this.available = true;
-                this.emit("available");
-              });
-            }
-          });
+          setImmediate(() => this._release());
           callback(null, info);
         });
+      }
+      /**
+       * Makes the connection available for the next message, or closes it once it has sent
+       * maxMessages messages
+       *
+       * @internal
+       */
+      _release() {
+        if (this.messages >= this.options.maxMessages) {
+          const err = new Error("Resource exhausted");
+          err.code = EMAXLIMIT;
+          this.connection.close();
+          this._fail(err);
+          return;
+        }
+        this.pool._checkRateLimit(() => {
+          this.available = true;
+          this._startIdleTimer();
+          this.emit("available");
+        });
+      }
+      /** @internal */
+      _startIdleTimer() {
+        if (!this.options.idleTimeout || this.options.idleTimeout < 0) {
+          return;
+        }
+        if (this._idleTimer && typeof this._idleTimer.refresh === "function") {
+          this._idleTimer.refresh();
+          return;
+        }
+        clearTimeout(this._idleTimer);
+        this._idleTimer = setTimeout(() => {
+          if (!this.available) {
+            return;
+          }
+          this.logger.debug({
+            tnx: "pool",
+            cid: this.id
+          }, "Closing connection #%s after it was idle for %sms", this.id, this.options.idleTimeout);
+          this.available = false;
+          this.connection.quit();
+        }, this.options.idleTimeout);
+        if (typeof this._idleTimer.unref === "function") {
+          this._idleTimer.unref();
+        }
+      }
+      /** @internal */
+      _stopIdleTimer() {
+        clearTimeout(this._idleTimer);
+        this._idleTimer = false;
       }
       /**
        * Closes the connection
        */
       close() {
         this._connected = false;
+        this._stopIdleTimer();
         if (this.auth && this.auth.oauth2) {
           this.auth.oauth2.removeAllListeners();
         }
@@ -22043,6 +23011,13 @@ var init_services = __esm({
         "host": "smtp.office365.com",
         "port": 587,
         "secure": false
+      },
+      "Oveyon": {
+        "description": "Oveyon",
+        "host": "smtp.oveyon.com",
+        "port": 587,
+        "secure": false,
+        "requireTLS": true
       },
       "Postmark": {
         "description": "Postmark",
@@ -22436,6 +23411,7 @@ var init_smtp_pool = __esm({
         this.options.maxConnections = this.options.maxConnections || 5;
         this.options.maxMessages = this.options.maxMessages || 100;
         this.options.maxRequeues = typeof this.options.maxRequeues === "number" ? this.options.maxRequeues : 5;
+        this.options.idleTimeout = typeof this.options.idleTimeout === "number" ? this.options.idleTimeout : 4 * 60 * 1e3;
         this.logger = getLogger2(this.options, {
           component: this.options.component || "smtp-pool"
         });
@@ -22453,6 +23429,7 @@ var init_smtp_pool = __esm({
         this._queue = [];
         this._connections = [];
         this._connectionCounter = 0;
+        this._pending = 0;
         this.idling = true;
         setImmediate(() => {
           if (this.idling) {
@@ -22483,10 +23460,18 @@ var init_smtp_pool = __esm({
           setImmediate(() => callback(err));
           return false;
         }
+        let counted = true;
+        this._pending++;
         this._queue.push({
           mail,
           requeueAttempts: 0,
-          callback
+          callback: (err, info) => {
+            if (counted) {
+              counted = false;
+              this._pending--;
+            }
+            callback(err, info);
+          }
         });
         if (this.idling && this._queue.length >= this.options.maxConnections) {
           this.idling = false;
@@ -22796,6 +23781,19 @@ var init_smtp_pool = __esm({
       isIdle() {
         return this.idling;
       }
+      /**
+       * Counts the messages the pool has not finished with yet: the ones waiting in the queue
+       * plus the ones a connection is transmitting right now. isIdle() only tells whether the
+       * pool can take another message, it is already true while a message is still being sent,
+       * so use this to check that nothing would be lost by closing the pool. A message that is
+       * re-queued after its connection dropped is counted until its callback runs, also while it waits to be put back on the queue, and
+       * it is no longer counted by the time its callback runs.
+       *
+       * @returns Number of queued and in-flight messages
+       */
+      pendingCount() {
+        return this._pending;
+      }
       verify(callback) {
         let promise;
         if (!callback) {
@@ -22805,7 +23803,8 @@ var init_smtp_pool = __esm({
         }
         const done = callback;
         const auth2 = new PoolResource(this).auth;
-        this.getSocket(this.options, (err, socketOptions) => {
+        const connectStartedAt = Date.now();
+        this.getSocket(Object.assign({}, this.options, { connectStartedAt }), (err, socketOptions) => {
           if (err) {
             return done(err);
           }
@@ -22822,6 +23821,7 @@ var init_smtp_pool = __esm({
             options = Object.assign(assign(false, options), socketOptions);
           }
           const connection = new smtp_connection_default(options);
+          connection._connectStartedAt = connectStartedAt;
           let returned = false;
           connection.once("error", (err2) => {
             if (returned) {
@@ -22887,7 +23887,7 @@ var init_smtp_pool = __esm({
 
 // node_modules/nodemailer/dist/esm/smtp-transport/index.js
 import { EventEmitter as EventEmitter5 } from "node:events";
-var SMTPTransport, smtp_transport_default;
+var MESSAGE_AUTH_KEYS, SMTPTransport, smtp_transport_default;
 var init_smtp_transport = __esm({
   "node_modules/nodemailer/dist/esm/smtp-transport/index.js"() {
     init_smtp_connection();
@@ -22896,6 +23896,7 @@ var init_smtp_transport = __esm({
     init_xoauth2();
     init_errors3();
     init_package_info();
+    MESSAGE_AUTH_KEYS = ["type", "user", "pass", "accessToken", "refreshToken", "expires"];
     SMTPTransport = class extends EventEmitter5 {
       constructor(options) {
         super();
@@ -22950,7 +23951,10 @@ var init_smtp_transport = __esm({
           }
           return this.auth;
         }
-        const authData = Object.assign({}, this.options.auth && typeof this.options.auth === "object" ? this.options.auth : {}, typeof authOpts === "object" ? authOpts : {});
+        const authData = Object.assign({}, this.options.auth && typeof this.options.auth === "object" ? this.options.auth : {});
+        if (typeof authOpts === "object") {
+          copyOwnKeys(authData, authOpts, (key) => !MESSAGE_AUTH_KEYS.includes(key));
+        }
         if (Object.keys(authData).length === 0) {
           return false;
         }
@@ -22990,7 +23994,8 @@ var init_smtp_transport = __esm({
        * @param callback Callback function
        */
       send(mail, callback) {
-        this.getSocket(this.options, (err, socketOptions) => {
+        const connectStartedAt = Date.now();
+        this.getSocket(Object.assign({}, this.options, { connectStartedAt }), (err, socketOptions) => {
           if (err) {
             return callback(err);
           }
@@ -23008,6 +24013,7 @@ var init_smtp_transport = __esm({
             options = Object.assign(assign(false, options), socketOptions);
           }
           const connection = new smtp_connection_default(options);
+          connection._connectStartedAt = connectStartedAt;
           let perCallAuth;
           const cleanupPerCallAuth = () => {
             if (perCallAuth && perCallAuth !== this.auth && perCallAuth.oauth2) {
@@ -23107,7 +24113,8 @@ var init_smtp_transport = __esm({
           });
         }
         const done = callback;
-        this.getSocket(this.options, (err, socketOptions) => {
+        const connectStartedAt = Date.now();
+        this.getSocket(Object.assign({}, this.options, { connectStartedAt }), (err, socketOptions) => {
           if (err) {
             return done(err);
           }
@@ -23124,6 +24131,7 @@ var init_smtp_transport = __esm({
             options = Object.assign(assign(false, options), socketOptions);
           }
           const connection = new smtp_connection_default(options);
+          connection._connectStartedAt = connectStartedAt;
           let returned = false;
           let perCallAuth;
           const cleanupPerCallAuth = () => {
@@ -23211,7 +24219,8 @@ var init_smtp_transport = __esm({
 
 // node_modules/nodemailer/dist/esm/sendmail-transport/index.js
 import { spawn } from "node:child_process";
-var SendmailTransport, sendmail_transport_default;
+import { pipeline as pipeline2 } from "node:stream";
+var STDIN_ERROR_EXIT_WAIT, SendmailTransport, sendmail_transport_default;
 var init_sendmail_transport = __esm({
   "node_modules/nodemailer/dist/esm/sendmail-transport/index.js"() {
     init_package_info();
@@ -23219,6 +24228,7 @@ var init_sendmail_transport = __esm({
     init_errors3();
     init_le_windows();
     init_le_unix();
+    STDIN_ERROR_EXIT_WAIT = 1e3;
     SendmailTransport = class {
       constructor(options) {
         options = options || {};
@@ -23289,35 +24299,63 @@ var init_sendmail_transport = __esm({
           return callback(E2);
         }
         if (sendmail) {
+          let stream;
+          const messageWritten = () => !!stream && stream.readableEnded;
+          let stdinError = null;
+          const release = () => {
+            if (stream && !messageWritten()) {
+              stream.destroy();
+            }
+          };
+          const fail = (err) => {
+            release();
+            callback(err);
+          };
           sendmail.on("error", (err) => {
             this.logger.error({
               err,
               tnx: "spawn",
               messageId
             }, "Error occurred when sending message %s. %s", messageId, err.message);
-            callback(err);
+            fail(err);
           });
-          sendmail.once("exit", (code) => {
-            if (!code) {
+          const onExit = (code, signal) => {
+            let err = null;
+            if (code) {
+              err = new Error(code === 127 ? "Sendmail command not found, process exited with code " + code : "Sendmail exited with code " + code);
+            } else if (signal) {
+              err = new Error("Sendmail was terminated by " + signal);
+            } else if (!messageWritten()) {
+              err = new Error("Sendmail exited before the message was written");
+            } else if (stdinError) {
+              err = stdinError;
+            }
+            if (!err) {
               return callback();
             }
-            const err = new Error(code === 127 ? "Sendmail command not found, process exited with code " + code : "Sendmail exited with code " + code);
-            err.code = ESENDMAIL;
+            err.code = err.code || ESENDMAIL;
             this.logger.error({
               err,
               tnx: "stdin",
               messageId
             }, "Error sending message %s to sendmail. %s", messageId, err.message);
-            callback(err);
-          });
-          sendmail.once("close", callback);
+            fail(err);
+          };
+          sendmail.once("exit", onExit);
+          sendmail.once("close", onExit);
           sendmail.stdin.on("error", (err) => {
             this.logger.error({
               err,
               tnx: "stdin",
               messageId
             }, "Error occurred when piping message %s to sendmail. %s", messageId, err.message);
-            callback(err);
+            if (stdinError) {
+              return;
+            }
+            stdinError = err;
+            release();
+            const exitTimer = setTimeout(() => fail(err), STDIN_ERROR_EXIT_WAIT);
+            sendmail.once("exit", () => clearTimeout(exitTimer));
           });
           const recipients = [].concat(envelope.to || []);
           if (recipients.length > 3) {
@@ -23328,10 +24366,9 @@ var init_sendmail_transport = __esm({
             messageId
           }, "Sending message %s to <%s>", messageId, recipients.join(", "));
           const sourceStream = mail.message.createReadStream();
-          let stream = sourceStream;
+          stream = sourceStream;
           if (this.options.newline) {
-            stream = sourceStream.pipe(this.winbreak ? new LeWindows() : new LeUnix());
-            sourceStream.once("error", (err) => stream.emit("error", err));
+            stream = pipeline2(sourceStream, this.winbreak ? new LeWindows() : new LeUnix(), () => false);
           }
           stream.once("error", (err) => {
             this.logger.error({
@@ -23758,11 +24795,11 @@ function createTestAccount(apiUrl, callback) {
     });
   }
   const done = callback;
-  if (ETHEREAL_CACHE && testAccount) {
+  if (etherealCache() && testAccount) {
     setImmediate(() => done(null, testAccount));
     return promise;
   }
-  apiUrl = apiUrl || ETHEREAL_API;
+  apiUrl = apiUrl || etherealApi();
   const chunks = [];
   let chunklen = 0;
   const requestHeaders = {};
@@ -23770,8 +24807,9 @@ function createTestAccount(apiUrl, callback) {
     requestor: name,
     version: version5
   };
-  if (ETHEREAL_API_KEY) {
-    requestHeaders.Authorization = "Bearer " + ETHEREAL_API_KEY;
+  const apiKey = etherealApiKey();
+  if (apiKey) {
+    requestHeaders.Authorization = "Bearer " + apiKey;
   }
   const fetchOptions = {
     contentType: "application/json",
@@ -23825,11 +24863,11 @@ function getTestMessageUrl(info) {
     }
   }
   if (infoProps.has("STATUS") && infoProps.has("MSGID")) {
-    return (testAccount && testAccount.web || ETHEREAL_WEB) + "/message/" + infoProps.get("MSGID");
+    return (testAccount && testAccount.web || etherealWeb()) + "/message/" + infoProps.get("MSGID");
   }
   return false;
 }
-var ETHEREAL_API, ETHEREAL_WEB, ETHEREAL_API_KEY, ETHEREAL_CACHE, testAccount, nodemailer, nodemailer_default;
+var etherealApi, etherealWeb, etherealApiKey, etherealCache, testAccount, nodemailer, nodemailer_default;
 var init_nodemailer = __esm({
   "node_modules/nodemailer/dist/esm/nodemailer.js"() {
     init_mailer();
@@ -23843,10 +24881,10 @@ var init_nodemailer = __esm({
     init_errors3();
     init_fetch();
     init_package_info();
-    ETHEREAL_API = (process.env.ETHEREAL_API || "https://api.nodemailer.com").replace(/\/+$/, "");
-    ETHEREAL_WEB = (process.env.ETHEREAL_WEB || "https://ethereal.email").replace(/\/+$/, "");
-    ETHEREAL_API_KEY = (process.env.ETHEREAL_API_KEY || "").replace(/\s*/g, "") || null;
-    ETHEREAL_CACHE = ["true", "yes", "y", "1"].includes((process.env.ETHEREAL_CACHE || "yes").toString().trim().toLowerCase());
+    etherealApi = () => (process.env.ETHEREAL_API || "https://api.nodemailer.com").replace(/\/+$/, "");
+    etherealWeb = () => (process.env.ETHEREAL_WEB || "https://ethereal.email").replace(/\/+$/, "");
+    etherealApiKey = () => (process.env.ETHEREAL_API_KEY || "").replace(/\s*/g, "") || null;
+    etherealCache = () => ["true", "yes", "y", "1"].includes((process.env.ETHEREAL_CACHE || "yes").toString().trim().toLowerCase());
     testAccount = false;
     nodemailer = {
       createTransport: createTransport2,
@@ -25178,152 +26216,68 @@ var init_migrator = __esm({
   }
 });
 
-// node_modules/hono/dist/compose.js
-var compose = (middleware, onError, onNotFound) => {
-  return (context, next) => {
-    let index2 = -1;
-    return dispatch(0);
-    async function dispatch(i2) {
-      if (i2 <= index2) {
-        throw new Error("next() called multiple times");
-      }
-      index2 = i2;
-      let res;
-      let isError = false;
-      let handler;
-      if (middleware[i2]) {
-        handler = middleware[i2][0][0];
-        context.req.routeIndex = i2;
-      } else {
-        handler = i2 === middleware.length && next || void 0;
-      }
-      if (handler) {
-        try {
-          res = await handler(context, () => dispatch(i2 + 1));
-        } catch (err) {
-          if (err instanceof Error && onError) {
-            context.error = err;
-            res = await onError(err, context);
-            isError = true;
-          } else {
-            throw err;
-          }
-        }
-      } else {
-        if (context.finalized === false && onNotFound) {
-          res = await onNotFound(context);
-        }
-      }
-      if (res && (context.finalized === false || isError)) {
-        context.res = res;
-      }
-      return context;
-    }
-  };
-};
-
 // node_modules/hono/dist/request/constants.js
 var GET_MATCH_RESULT = /* @__PURE__ */ Symbol();
 
 // node_modules/hono/dist/utils/buffer.js
 var bufferToFormData = (arrayBuffer, contentType) => {
-  const response = new Response(arrayBuffer, {
-    headers: {
-      // Normalize the media type (case-insensitive) while keeping parameters like the boundary
-      "Content-Type": contentType.replace(/^[^;]+/, (mediaType) => mediaType.toLowerCase())
-    }
-  });
-  return response.formData();
+  return new Response(arrayBuffer, { headers: { "Content-Type": contentType.replace(/^[^;]+/, (mediaType) => mediaType.toLowerCase()) } }).formData();
 };
 
 // node_modules/hono/dist/utils/body.js
-var MAX_NESTING_DEPTH = 32;
 var MAX_NESTED_OBJECTS = 1e4;
 var isRawRequest = (request) => "headers" in request;
 var parseBody = async (request, options = /* @__PURE__ */ Object.create(null)) => {
   const { all = false, dot = false } = options;
-  const headers = isRawRequest(request) ? request.headers : request.raw.headers;
-  const contentType = headers.get("Content-Type");
-  const mediaType = contentType?.split(";")[0].trim().toLowerCase();
-  if (mediaType === "multipart/form-data" || mediaType === "application/x-www-form-urlencoded") {
-    return parseFormData(request, { all, dot });
-  }
+  const mediaType = (isRawRequest(request) ? request.headers : request.raw.headers).get("Content-Type")?.split(";")[0].trim().toLowerCase();
+  if (mediaType === "multipart/form-data" || mediaType === "application/x-www-form-urlencoded") return parseFormData(request, {
+    all,
+    dot
+  });
   return {};
 };
 async function parseFormData(request, options) {
-  if (!isRawRequest(request) && request.bodyCache.formData) {
-    return convertFormDataToBodyData(
-      await request.bodyCache.formData,
-      options
-    );
-  }
+  if (!isRawRequest(request) && request.bodyCache.formData) return convertFormDataToBodyData(await request.bodyCache.formData, options);
   const headers = isRawRequest(request) ? request.headers : request.raw.headers;
   const arrayBuffer = await request.arrayBuffer();
   const formDataPromise = bufferToFormData(arrayBuffer, headers.get("Content-Type") || "");
-  if (!isRawRequest(request)) {
-    request.bodyCache.formData = formDataPromise;
-  }
+  if (!isRawRequest(request)) request.bodyCache.formData = formDataPromise;
   const formData = await formDataPromise;
-  if (formData) {
-    return convertFormDataToBodyData(formData, options);
-  }
+  if (formData) return convertFormDataToBodyData(formData, options);
   return {};
 }
 function convertFormDataToBodyData(formData, options) {
   const form = /* @__PURE__ */ Object.create(null);
   const nestingState = { count: 0 };
   formData.forEach((value, key) => {
-    const shouldParseAllValues = options.all || key.endsWith("[]");
-    if (!shouldParseAllValues) {
-      form[key] = value;
-    } else {
-      handleParsingAllValues(form, key, value);
+    if (!(options.all || key.endsWith("[]"))) form[key] = value;
+    else handleParsingAllValues(form, key, value);
+  });
+  if (options.dot) Object.entries(form).forEach(([key, value]) => {
+    if (key.includes(".")) {
+      handleParsingNestedValues(form, key, value, nestingState);
+      delete form[key];
     }
   });
-  if (options.dot) {
-    Object.entries(form).forEach(([key, value]) => {
-      const shouldParseDotValues = key.includes(".");
-      if (shouldParseDotValues) {
-        handleParsingNestedValues(form, key, value, nestingState);
-        delete form[key];
-      }
-    });
-  }
   return form;
 }
 var handleParsingAllValues = (form, key, value) => {
   if (form[key] !== void 0) {
-    if (Array.isArray(form[key])) {
-      ;
-      form[key].push(value);
-    } else {
-      form[key] = [form[key], value];
-    }
-  } else {
-    if (!key.endsWith("[]")) {
-      form[key] = value;
-    } else {
-      form[key] = [value];
-    }
-  }
+    if (Array.isArray(form[key])) form[key].push(value);
+    else form[key] = [form[key], value];
+  } else if (!key.endsWith("[]")) form[key] = value;
+  else form[key] = [value];
 };
 var handleParsingNestedValues = (form, key, value, state) => {
-  if (/(?:^|\.)__proto__\./.test(key)) {
-    return;
-  }
+  if (/(?:^|\.)__proto__\./.test(key)) return;
   let nestedForm = form;
-  const keys = key.split(".", MAX_NESTING_DEPTH + 2);
-  if (keys.length > MAX_NESTING_DEPTH + 1) {
-    throwNestingLimitExceeded();
-  }
+  const keys = key.split(".", 34);
+  if (keys.length > 33) throwNestingLimitExceeded();
   keys.forEach((key2, index2) => {
-    if (index2 === keys.length - 1) {
-      nestedForm[key2] = value;
-    } else {
+    if (index2 === keys.length - 1) nestedForm[key2] = value;
+    else {
       if (!nestedForm[key2] || typeof nestedForm[key2] !== "object" || Array.isArray(nestedForm[key2]) || nestedForm[key2] instanceof File) {
-        if (state.count++ >= MAX_NESTED_OBJECTS) {
-          throwNestingLimitExceeded();
-        }
+        if (state.count++ >= MAX_NESTED_OBJECTS) throwNestingLimitExceeded();
         nestedForm[key2] = /* @__PURE__ */ Object.create(null);
       }
       nestedForm = nestedForm[key2];
@@ -25337,9 +26291,7 @@ var throwNestingLimitExceeded = () => {
 // node_modules/hono/dist/utils/url.js
 var splitPath = (path6) => {
   const paths = path6.split("/");
-  if (paths[0] === "") {
-    paths.shift();
-  }
+  if (paths[0] === "") paths.shift();
   return paths;
 };
 var splitRoutingPath = (routePath) => {
@@ -25354,34 +26306,42 @@ var extractGroupsFromPath = (path6) => {
     groups.push([mark, match2]);
     return mark;
   });
-  return { groups, path: path6 };
+  return {
+    groups,
+    path: path6
+  };
 };
 var replaceGroupMarks = (paths, groups) => {
   for (let i2 = groups.length - 1; i2 >= 0; i2--) {
     const [mark] = groups[i2];
-    for (let j2 = paths.length - 1; j2 >= 0; j2--) {
-      if (paths[j2].includes(mark)) {
-        paths[j2] = paths[j2].replace(mark, groups[i2][1]);
-        break;
-      }
+    for (let j2 = paths.length - 1; j2 >= 0; j2--) if (paths[j2].includes(mark)) {
+      paths[j2] = paths[j2].replace(mark, groups[i2][1]);
+      break;
     }
   }
   return paths;
 };
 var patternCache = {};
 var getPattern = (label, next) => {
-  if (label === "*") {
-    return "*";
-  }
+  if (label === "*") return "*";
   const match2 = label.match(/^\:([^\{\}]+)(?:\{(.+)\})?$/);
   if (match2) {
     const cacheKey2 = `${label}#${next}`;
     if (!patternCache[cacheKey2]) {
-      if (match2[2]) {
-        patternCache[cacheKey2] = next && next[0] !== ":" && next[0] !== "*" ? [cacheKey2, match2[1], new RegExp(`^${match2[2]}(?=/${next})`)] : [label, match2[1], new RegExp(`^${match2[2]}$`)];
-      } else {
-        patternCache[cacheKey2] = [label, match2[1], true];
-      }
+      if (match2[2]) patternCache[cacheKey2] = next && next[0] !== ":" && next[0] !== "*" ? [
+        cacheKey2,
+        match2[1],
+        new RegExp(`^${match2[2]}(?=/${next})`)
+      ] : [
+        label,
+        match2[1],
+        new RegExp(`^${match2[2]}$`)
+      ];
+      else patternCache[cacheKey2] = [
+        label,
+        match2[1],
+        true
+      ];
     }
     return patternCache[cacheKey2];
   }
@@ -25413,9 +26373,7 @@ var getPath = (request) => {
       const end = queryIndex === -1 ? hashIndex === -1 ? void 0 : hashIndex : hashIndex === -1 ? queryIndex : Math.min(queryIndex, hashIndex);
       const path6 = url.slice(start, end);
       return tryDecodeURI(path6.includes("%25") ? path6.replace(/%25/g, "%2525") : path6);
-    } else if (charCode === 63 || charCode === 35) {
-      break;
-    }
+    } else if (charCode === 63 || charCode === 35) break;
   }
   return url.slice(start, i2);
 };
@@ -25424,74 +26382,52 @@ var getPathNoStrict = (request) => {
   return result.length > 1 && result.at(-1) === "/" ? result.slice(0, -1) : result;
 };
 var mergePath = (base2, sub, ...rest) => {
-  if (rest.length) {
-    sub = mergePath(sub, ...rest);
-  }
+  if (rest.length) sub = mergePath(sub, ...rest);
   return `${base2?.[0] === "/" ? "" : "/"}${base2}${sub === "/" ? "" : `${base2?.at(-1) === "/" ? "" : "/"}${sub?.[0] === "/" ? sub.slice(1) : sub}`}`;
 };
 var checkOptionalParameter = (path6) => {
-  if (path6.charCodeAt(path6.length - 1) !== 63 || !path6.includes(":")) {
-    return null;
-  }
+  if (path6.charCodeAt(path6.length - 1) !== 63 || !path6.includes(":")) return null;
   const segments = path6.split("/");
   const results = [];
   let basePath = "";
   segments.forEach((segment) => {
-    if (segment !== "" && !/\:/.test(segment)) {
-      basePath += "/" + segment;
-    } else if (/\:/.test(segment)) {
+    if (segment !== "" && !/\:/.test(segment)) basePath += "/" + segment;
+    else if (/\:/.test(segment)) {
       if (segment.charCodeAt(segment.length - 1) === 63) {
-        if (results.length === 0 && basePath === "") {
-          results.push("/");
-        } else {
-          results.push(basePath);
-        }
+        if (results.length === 0 && basePath === "") results.push("/");
+        else results.push(basePath);
         const optionalSegment = segment.slice(0, -1);
         basePath += "/" + optionalSegment;
         results.push(basePath);
-      } else {
-        basePath += "/" + segment;
-      }
+      } else basePath += "/" + segment;
     }
   });
   return results.filter((v2, i2, a2) => a2.indexOf(v2) === i2);
 };
 var tryDecodeURIComponent = (str) => str.indexOf("%") !== -1 ? tryDecode(str, decodeURIComponent_) : str;
 var _decodeURI = (value) => {
-  if (value.indexOf("+") !== -1) {
-    value = value.replace(/\+/g, " ");
-  }
+  if (value.indexOf("+") !== -1) value = value.replace(/\+/g, " ");
   return tryDecodeURIComponent(value);
 };
 var _getQueryParam = (url, key, multiple) => {
   const hashIndex = url.indexOf("#", 8);
-  if (hashIndex !== -1) {
-    url = url.slice(0, hashIndex);
-  }
+  if (hashIndex !== -1) url = url.slice(0, hashIndex);
   let encoded;
   if (!multiple && key && key.indexOf("%") === -1 && key.indexOf("+") === -1) {
     let keyIndex2 = url.indexOf("?", 8);
-    if (keyIndex2 === -1) {
-      return void 0;
-    }
-    if (!url.startsWith(key, keyIndex2 + 1)) {
-      keyIndex2 = url.indexOf(`&${key}`, keyIndex2 + 1);
-    }
+    if (keyIndex2 === -1) return;
+    if (!url.startsWith(key, keyIndex2 + 1)) keyIndex2 = url.indexOf(`&${key}`, keyIndex2 + 1);
     while (keyIndex2 !== -1) {
       const trailingKeyCode = url.charCodeAt(keyIndex2 + key.length + 1);
       if (trailingKeyCode === 61) {
         const valueIndex = keyIndex2 + key.length + 2;
         const endIndex = url.indexOf("&", valueIndex);
         return _decodeURI(url.slice(valueIndex, endIndex === -1 ? void 0 : endIndex));
-      } else if (trailingKeyCode == 38 || isNaN(trailingKeyCode)) {
-        return "";
-      }
+      } else if (trailingKeyCode == 38 || isNaN(trailingKeyCode)) return "";
       keyIndex2 = url.indexOf(`&${key}`, keyIndex2 + 1);
     }
     encoded = /[%+]/.test(url);
-    if (!encoded) {
-      return void 0;
-    }
+    if (!encoded) return;
   }
   const results = /* @__PURE__ */ Object.create(null);
   encoded ??= /[%+]/.test(url);
@@ -25499,38 +26435,21 @@ var _getQueryParam = (url, key, multiple) => {
   while (keyIndex !== -1) {
     const nextKeyIndex = url.indexOf("&", keyIndex + 1);
     let valueIndex = url.indexOf("=", keyIndex);
-    if (valueIndex > nextKeyIndex && nextKeyIndex !== -1) {
-      valueIndex = -1;
-    }
-    let name2 = url.slice(
-      keyIndex + 1,
-      valueIndex === -1 ? nextKeyIndex === -1 ? void 0 : nextKeyIndex : valueIndex
-    );
-    if (encoded) {
-      name2 = _decodeURI(name2);
-    }
+    if (valueIndex > nextKeyIndex && nextKeyIndex !== -1) valueIndex = -1;
+    let name2 = url.slice(keyIndex + 1, valueIndex === -1 ? nextKeyIndex === -1 ? void 0 : nextKeyIndex : valueIndex);
+    if (encoded) name2 = _decodeURI(name2);
     keyIndex = nextKeyIndex;
-    if (name2 === "") {
-      continue;
-    }
+    if (name2 === "") continue;
     let value;
-    if (valueIndex === -1) {
-      value = "";
-    } else {
+    if (valueIndex === -1) value = "";
+    else {
       value = url.slice(valueIndex + 1, nextKeyIndex === -1 ? void 0 : nextKeyIndex);
-      if (encoded) {
-        value = _decodeURI(value);
-      }
+      if (encoded) value = _decodeURI(value);
     }
     if (multiple) {
-      if (!(results[name2] && Array.isArray(results[name2]))) {
-        results[name2] = [];
-      }
-      ;
+      if (!(results[name2] && Array.isArray(results[name2]))) results[name2] = [];
       results[name2].push(value);
-    } else {
-      results[name2] ??= value;
-    }
+    } else results[name2] ??= value;
   }
   return key ? results[key] : results;
 };
@@ -25543,36 +26462,35 @@ var decodeURIComponent_ = decodeURIComponent;
 // node_modules/hono/dist/request.js
 var HonoRequest = class {
   /**
-   * `.raw` can get the raw Request object.
-   *
-   * @see {@link https://hono.dev/docs/api/request#raw}
-   *
-   * @example
-   * ```ts
-   * // For Cloudflare Workers
-   * app.post('/', async (c) => {
-   *   const metadata = c.req.raw.cf?.hostMetadata?
-   *   ...
-   * })
-   * ```
-   */
+  * `.raw` can get the raw Request object.
+  *
+  * @see {@link https://hono.dev/docs/api/request#raw}
+  *
+  * @example
+  * ```ts
+  * // For Cloudflare Workers
+  * app.post('/', async (c) => {
+  *   const metadata = c.req.raw.cf?.hostMetadata?
+  *   ...
+  * })
+  * ```
+  */
   raw;
   #validatedData;
-  // Short name of validatedData
   #matchResult;
   routeIndex = 0;
   /**
-   * `.path` can get the pathname of the request.
-   *
-   * @see {@link https://hono.dev/docs/api/request#path}
-   *
-   * @example
-   * ```ts
-   * app.get('/about/me', (c) => {
-   *   const pathname = c.req.path // `/about/me`
-   * })
-   * ```
-   */
+  * `.path` can get the pathname of the request.
+  *
+  * @see {@link https://hono.dev/docs/api/request#path}
+  *
+  * @example
+  * ```ts
+  * app.get('/about/me', (c) => {
+  *   const pathname = c.req.path // `/about/me`
+  * })
+  * ```
+  */
   path;
   bodyCache = {};
   constructor(request, path6 = "/", matchResult = [[]]) {
@@ -25593,9 +26511,7 @@ var HonoRequest = class {
     const keys = Object.keys(this.#matchResult[0][this.routeIndex]?.[1] ?? {});
     for (const key of keys) {
       const value = this.#getParamValue(this.#matchResult[0][this.routeIndex][1][key]);
-      if (value !== void 0) {
-        decoded[key] = tryDecodeURIComponent(value);
-      }
+      if (value !== void 0) decoded[key] = tryDecodeURIComponent(value);
     }
     return decoded;
   }
@@ -25609,9 +26525,7 @@ var HonoRequest = class {
     return getQueryParams(this.url, key);
   }
   header(name2) {
-    if (name2) {
-      return this.raw.headers.get(name2) ?? void 0;
-    }
+    if (name2) return this.raw.headers.get(name2) ?? void 0;
     const headerData = /* @__PURE__ */ Object.create(null);
     this.raw.headers.forEach((value, key) => {
       headerData[key] = value;
@@ -25624,146 +26538,140 @@ var HonoRequest = class {
   #cachedBody = (key) => {
     const { bodyCache, raw: raw2 } = this;
     const cachedBody = bodyCache[key];
-    if (cachedBody) {
-      return cachedBody;
-    }
-    for (const anyCachedKey in bodyCache) {
-      return bodyCache[anyCachedKey].then((body) => {
-        if (anyCachedKey === "json") {
-          body = JSON.stringify(body);
-        }
-        return new Response(body)[key]();
-      });
-    }
+    if (cachedBody) return cachedBody;
+    for (const anyCachedKey in bodyCache) return bodyCache[anyCachedKey].then((body) => {
+      if (anyCachedKey === "json") body = JSON.stringify(body);
+      const contentType = anyCachedKey === "formData" ? void 0 : raw2.headers.get("content-type");
+      return new Response(body, { headers: contentType ? { "Content-Type": contentType } : void 0 })[key]();
+    });
     return bodyCache[key] = raw2[key]();
   };
   /**
-   * `.json()` can parse Request body of type `application/json`
-   *
-   * @see {@link https://hono.dev/docs/api/request#json}
-   *
-   * @example
-   * ```ts
-   * app.post('/entry', async (c) => {
-   *   const body = await c.req.json()
-   * })
-   * ```
-   */
+  * `.json()` can parse Request body of type `application/json`
+  *
+  * @see {@link https://hono.dev/docs/api/request#json}
+  *
+  * @example
+  * ```ts
+  * app.post('/entry', async (c) => {
+  *   const body = await c.req.json()
+  * })
+  * ```
+  */
   json() {
     return this.#cachedBody("text").then((text4) => JSON.parse(text4));
   }
   /**
-   * `.text()` can parse Request body of type `text/plain`
-   *
-   * @see {@link https://hono.dev/docs/api/request#text}
-   *
-   * @example
-   * ```ts
-   * app.post('/entry', async (c) => {
-   *   const body = await c.req.text()
-   * })
-   * ```
-   */
+  * `.text()` can parse Request body of type `text/plain`
+  *
+  * @see {@link https://hono.dev/docs/api/request#text}
+  *
+  * @example
+  * ```ts
+  * app.post('/entry', async (c) => {
+  *   const body = await c.req.text()
+  * })
+  * ```
+  */
   text() {
     return this.#cachedBody("text");
   }
   /**
-   * `.arrayBuffer()` parse Request body as an `ArrayBuffer`
-   *
-   * @see {@link https://hono.dev/docs/api/request#arraybuffer}
-   *
-   * @example
-   * ```ts
-   * app.post('/entry', async (c) => {
-   *   const body = await c.req.arrayBuffer()
-   * })
-   * ```
-   */
+  * `.arrayBuffer()` parse Request body as an `ArrayBuffer`
+  *
+  * @see {@link https://hono.dev/docs/api/request#arraybuffer}
+  *
+  * @example
+  * ```ts
+  * app.post('/entry', async (c) => {
+  *   const body = await c.req.arrayBuffer()
+  * })
+  * ```
+  */
   arrayBuffer() {
     return this.#cachedBody("arrayBuffer");
   }
   /**
-   * `.bytes()` parses the request body as a `Uint8Array`.
-   *
-   * @see {@link https://hono.dev/docs/api/request#bytes}
-   *
-   * @example
-   * ```ts
-   * app.post('/entry', async (c) => {
-   *   const body = await c.req.bytes()
-   * })
-   * ```
-   */
+  * `.bytes()` parses the request body as a `Uint8Array`.
+  *
+  * @see {@link https://hono.dev/docs/api/request#bytes}
+  *
+  * @example
+  * ```ts
+  * app.post('/entry', async (c) => {
+  *   const body = await c.req.bytes()
+  * })
+  * ```
+  */
   bytes() {
     return this.#cachedBody("arrayBuffer").then((buffer2) => new Uint8Array(buffer2));
   }
   /**
-   * Parses the request body as a `Blob`.
-   * @example
-   * ```ts
-   * app.post('/entry', async (c) => {
-   *   const body = await c.req.blob();
-   * });
-   * ```
-   * @see https://hono.dev/docs/api/request#blob
-   */
+  * Parses the request body as a `Blob`.
+  * @example
+  * ```ts
+  * app.post('/entry', async (c) => {
+  *   const body = await c.req.blob();
+  * });
+  * ```
+  * @see https://hono.dev/docs/api/request#blob
+  */
   blob() {
     return this.#cachedBody("blob");
   }
   /**
-   * Parses the request body as `FormData`.
-   * @example
-   * ```ts
-   * app.post('/entry', async (c) => {
-   *   const body = await c.req.formData();
-   * });
-   * ```
-   * @see https://hono.dev/docs/api/request#formdata
-   */
+  * Parses the request body as `FormData`.
+  * @example
+  * ```ts
+  * app.post('/entry', async (c) => {
+  *   const body = await c.req.formData();
+  * });
+  * ```
+  * @see https://hono.dev/docs/api/request#formdata
+  */
   formData() {
     return this.#cachedBody("formData");
   }
   /**
-   * Adds validated data to the request.
-   *
-   * @param target - The target of the validation.
-   * @param data - The validated data to add.
-   */
+  * Adds validated data to the request.
+  *
+  * @param target - The target of the validation.
+  * @param data - The validated data to add.
+  */
   addValidatedData(target, data) {
-    ;
     (this.#validatedData ??= {})[target] = data;
   }
   valid(target) {
     return this.#validatedData?.[target];
   }
   /**
-   * `.url()` can get the request url strings.
-   *
-   * @see {@link https://hono.dev/docs/api/request#url}
-   *
-   * @example
-   * ```ts
-   * app.get('/about/me', (c) => {
-   *   const url = c.req.url // `http://localhost:8787/about/me`
-   *   ...
-   * })
-   * ```
-   */
+  * `.url` can get the request url strings.
+  *
+  * @see {@link https://hono.dev/docs/api/request#url}
+  *
+  * @example
+  * ```ts
+  * app.get('/about/me', (c) => {
+  *   const url = c.req.url // `http://localhost:8787/about/me`
+  *   ...
+  * })
+  * ```
+  */
   get url() {
     return this.raw.url;
   }
   /**
-   * `.method()` can get the method name of the request.
-   *
-   * @see {@link https://hono.dev/docs/api/request#method}
-   *
-   * @example
-   * ```ts
-   * app.get('/about/me', (c) => {
-   *   const method = c.req.method // `GET`
-   * })
-   * ```
-   */
+  * `.method` can get the method name of the request.
+  *
+  * @see {@link https://hono.dev/docs/api/request#method}
+  *
+  * @example
+  * ```ts
+  * app.get('/about/me', (c) => {
+  *   const method = c.req.method // `GET`
+  * })
+  * ```
+  */
   get method() {
     return this.raw.method;
   }
@@ -25771,51 +26679,51 @@ var HonoRequest = class {
     return this.#matchResult;
   }
   /**
-   * `.matchedRoutes()` can return a matched route in the handler
-   *
-   * @deprecated
-   *
-   * Use matchedRoutes helper defined in "hono/route" instead.
-   *
-   * @see {@link https://hono.dev/docs/api/request#matchedroutes}
-   *
-   * @example
-   * ```ts
-   * app.use('*', async function logger(c, next) {
-   *   await next()
-   *   c.req.matchedRoutes.forEach(({ handler, method, path }, i) => {
-   *     const name = handler.name || (handler.length < 2 ? '[handler]' : '[middleware]')
-   *     console.log(
-   *       method,
-   *       ' ',
-   *       path,
-   *       ' '.repeat(Math.max(10 - path.length, 0)),
-   *       name,
-   *       i === c.req.routeIndex ? '<- respond from here' : ''
-   *     )
-   *   })
-   * })
-   * ```
-   */
+  * `.matchedRoutes` can return a matched route in the handler
+  *
+  * @deprecated
+  *
+  * Use matchedRoutes helper defined in "hono/route" instead.
+  *
+  * @see {@link https://hono.dev/docs/api/request#matchedroutes}
+  *
+  * @example
+  * ```ts
+  * app.use('*', async function logger(c, next) {
+  *   await next()
+  *   c.req.matchedRoutes.forEach(({ handler, method, path }, i) => {
+  *     const name = handler.name || (handler.length < 2 ? '[handler]' : '[middleware]')
+  *     console.log(
+  *       method,
+  *       ' ',
+  *       path,
+  *       ' '.repeat(Math.max(10 - path.length, 0)),
+  *       name,
+  *       i === c.req.routeIndex ? '<- respond from here' : ''
+  *     )
+  *   })
+  * })
+  * ```
+  */
   get matchedRoutes() {
     return this.#matchResult[0].map(([[, route]]) => route);
   }
   /**
-   * `routePath()` can retrieve the path registered within the handler
-   *
-   * @deprecated
-   *
-   * Use routePath helper defined in "hono/route" instead.
-   *
-   * @see {@link https://hono.dev/docs/api/request#routepath}
-   *
-   * @example
-   * ```ts
-   * app.get('/posts/:id', (c) => {
-   *   return c.json({ path: c.req.routePath })
-   * })
-   * ```
-   */
+  * `.routePath` can retrieve the path registered within the handler
+  *
+  * @deprecated
+  *
+  * Use routePath helper defined in "hono/route" instead.
+  *
+  * @see {@link https://hono.dev/docs/api/request#routepath}
+  *
+  * @example
+  * ```ts
+  * app.get('/posts/:id', (c) => {
+  *   return c.json({ path: c.req.routePath })
+  * })
+  * ```
+  */
   get routePath() {
     return this.#matchResult[0].map(([[, route]]) => route)[this.routeIndex].path;
   }
@@ -25835,32 +26743,20 @@ var raw = (value, callbacks) => {
 };
 var resolveCallback = async (str, phase, preserveCallbacks, context, buffer2) => {
   if (typeof str === "object" && !(str instanceof String)) {
-    if (!(str instanceof Promise)) {
-      str = str.toString();
-    }
-    if (str instanceof Promise) {
-      str = await str;
-    }
+    if (!(str instanceof Promise)) str = str.toString();
+    if (str instanceof Promise) str = await str;
   }
   const callbacks = str.callbacks;
-  if (!callbacks?.length) {
-    return Promise.resolve(str);
-  }
-  if (buffer2) {
-    buffer2[0] += str;
-  } else {
-    buffer2 = [str];
-  }
-  const resStr = Promise.all(callbacks.map((c2) => c2({ phase, buffer: buffer2, context }))).then(
-    (res) => Promise.all(
-      res.filter(Boolean).map((str2) => resolveCallback(str2, phase, false, context, buffer2))
-    ).then(() => buffer2[0])
-  );
-  if (preserveCallbacks) {
-    return raw(await resStr, callbacks);
-  } else {
-    return resStr;
-  }
+  if (!callbacks?.length) return Promise.resolve(str);
+  if (buffer2) buffer2[0] += str;
+  else buffer2 = [str];
+  const resStr = Promise.all(callbacks.map((c2) => c2({
+    phase,
+    buffer: buffer2,
+    context
+  }))).then((res) => Promise.all(res.filter(Boolean).map((str2) => resolveCallback(str2, phase, false, context, buffer2))).then(() => buffer2[0]));
+  if (preserveCallbacks) return raw(await resStr, callbacks);
+  else return resStr;
 };
 
 // node_modules/hono/dist/context.js
@@ -25876,36 +26772,36 @@ var Context = class {
   #rawRequest;
   #req;
   /**
-   * `.env` can get bindings (environment variables, secrets, KV namespaces, D1 database, R2 bucket etc.) in Cloudflare Workers.
-   *
-   * @see {@link https://hono.dev/docs/api/context#env}
-   *
-   * @example
-   * ```ts
-   * // Environment object for Cloudflare Workers
-   * app.get('*', async c => {
-   *   const counter = c.env.COUNTER
-   * })
-   * ```
-   */
+  * `.env` can get bindings (environment variables, secrets, KV namespaces, D1 database, R2 bucket etc.) in Cloudflare Workers.
+  *
+  * @see {@link https://hono.dev/docs/api/context#env}
+  *
+  * @example
+  * ```ts
+  * // Environment object for Cloudflare Workers
+  * app.get('*', async c => {
+  *   const counter = c.env.COUNTER
+  * })
+  * ```
+  */
   env = {};
   #var;
   finalized = false;
   /**
-   * `.error` can get the error object from the middleware if the Handler throws an error.
-   *
-   * @see {@link https://hono.dev/docs/api/context#error}
-   *
-   * @example
-   * ```ts
-   * app.use('*', async (c, next) => {
-   *   await next()
-   *   if (c.error) {
-   *     // do something...
-   *   }
-   * })
-   * ```
-   */
+  * `.error` can get the error object from the middleware if the Handler throws an error.
+  *
+  * @see {@link https://hono.dev/docs/api/context#error}
+  *
+  * @example
+  * ```ts
+  * app.use('*', async (c, next) => {
+  *   await next()
+  *   if (c.error) {
+  *     // do something...
+  *   }
+  * })
+  * ```
+  */
   error;
   #status;
   #executionCtx;
@@ -25917,11 +26813,11 @@ var Context = class {
   #matchResult;
   #path;
   /**
-   * Creates an instance of the Context class.
-   *
-   * @param req - The Request object.
-   * @param options - Optional configuration options for the context.
-   */
+  * Creates an instance of the Context class.
+  *
+  * @param req - The Request object.
+  * @param options - Optional configuration options for the context.
+  */
   constructor(req, options) {
     this.#rawRequest = req;
     if (options) {
@@ -25933,245 +26829,210 @@ var Context = class {
     }
   }
   /**
-   * `.req` is the instance of {@link HonoRequest}.
-   */
+  * `.req` is the instance of {@link HonoRequest}.
+  */
   get req() {
     this.#req ??= new HonoRequest(this.#rawRequest, this.#path, this.#matchResult);
     return this.#req;
   }
   /**
-   * @see {@link https://hono.dev/docs/api/context#event}
-   * The FetchEvent associated with the current request.
-   *
-   * @throws Will throw an error if the context does not have a FetchEvent.
-   */
+  * @see {@link https://hono.dev/docs/api/context#event}
+  * The FetchEvent associated with the current request.
+  *
+  * @throws Will throw an error if the context does not have a FetchEvent.
+  */
   get event() {
-    if (this.#executionCtx && "respondWith" in this.#executionCtx) {
-      return this.#executionCtx;
-    } else {
-      throw Error("This context has no FetchEvent");
-    }
+    if (this.#executionCtx && "respondWith" in this.#executionCtx) return this.#executionCtx;
+    else throw Error("This context has no FetchEvent");
   }
   /**
-   * @see {@link https://hono.dev/docs/api/context#executionctx}
-   * The ExecutionContext associated with the current request.
-   *
-   * @throws Will throw an error if the context does not have an ExecutionContext.
-   */
+  * @see {@link https://hono.dev/docs/api/context#executionctx}
+  * The ExecutionContext associated with the current request.
+  *
+  * @throws Will throw an error if the context does not have an ExecutionContext.
+  */
   get executionCtx() {
-    if (this.#executionCtx) {
-      return this.#executionCtx;
-    } else {
-      throw Error("This context has no ExecutionContext");
-    }
+    if (this.#executionCtx) return this.#executionCtx;
+    else throw Error("This context has no ExecutionContext");
   }
   /**
-   * @see {@link https://hono.dev/docs/api/context#res}
-   * The Response object for the current request.
-   */
+  * @see {@link https://hono.dev/docs/api/context#res}
+  * The Response object for the current request.
+  */
   get res() {
-    return this.#res ||= createResponseInstance(null, {
-      headers: this.#preparedHeaders ??= new Headers()
-    });
+    return this.#res ||= createResponseInstance(null, { headers: this.#preparedHeaders ??= new Headers() });
   }
   /**
-   * Sets the Response object for the current request.
-   *
-   * @param _res - The Response object to set.
-   */
+  * Sets the Response object for the current request.
+  *
+  * @param _res - The Response object to set.
+  */
   set res(_res) {
     if (this.#res && _res) {
       _res = createResponseInstance(_res.body, _res);
       for (const [k2, v2] of this.#res.headers.entries()) {
-        if (k2 === "content-type") {
-          continue;
-        }
+        if (k2 === "content-type") continue;
         if (k2 === "set-cookie") {
           const cookies = this.#res.headers.getSetCookie();
           _res.headers.delete("set-cookie");
-          for (const cookie of cookies) {
-            _res.headers.append("set-cookie", cookie);
-          }
-        } else {
-          _res.headers.set(k2, v2);
-        }
+          for (const cookie of cookies) _res.headers.append("set-cookie", cookie);
+        } else _res.headers.set(k2, v2);
       }
     }
     this.#res = _res;
     this.finalized = true;
   }
   /**
-   * `.render()` can create a response within a layout.
-   *
-   * @see {@link https://hono.dev/docs/api/context#render-setrenderer}
-   *
-   * @example
-   * ```ts
-   * app.get('/', (c) => {
-   *   return c.render('Hello!')
-   * })
-   * ```
-   */
+  * `.render()` can create a response within a layout.
+  *
+  * @see {@link https://hono.dev/docs/api/context#render-setrenderer}
+  *
+  * @example
+  * ```ts
+  * app.get('/', (c) => {
+  *   return c.render('Hello!')
+  * })
+  * ```
+  */
   render = (...args) => {
     this.#renderer ??= (content) => this.html(content);
     return this.#renderer(...args);
   };
   /**
-   * Sets the layout for the response.
-   *
-   * @param layout - The layout to set.
-   * @returns The layout function.
-   */
+  * Sets the layout for the response.
+  *
+  * @param layout - The layout to set.
+  * @returns The layout function.
+  */
   setLayout = (layout) => this.#layout = layout;
   /**
-   * Gets the current layout for the response.
-   *
-   * @returns The current layout function.
-   */
+  * Gets the current layout for the response.
+  *
+  * @returns The current layout function.
+  */
   getLayout = () => this.#layout;
   /**
-   * `.setRenderer()` can set the layout in the custom middleware.
-   *
-   * @see {@link https://hono.dev/docs/api/context#render-setrenderer}
-   *
-   * @example
-   * ```tsx
-   * app.use('*', async (c, next) => {
-   *   c.setRenderer((content) => {
-   *     return c.html(
-   *       <html>
-   *         <body>
-   *           <p>{content}</p>
-   *         </body>
-   *       </html>
-   *     )
-   *   })
-   *   await next()
-   * })
-   * ```
-   */
+  * `.setRenderer()` can set the layout in the custom middleware.
+  *
+  * @see {@link https://hono.dev/docs/api/context#render-setrenderer}
+  *
+  * @example
+  * ```tsx
+  * app.use('*', async (c, next) => {
+  *   c.setRenderer((content) => {
+  *     return c.html(
+  *       <html>
+  *         <body>
+  *           <p>{content}</p>
+  *         </body>
+  *       </html>
+  *     )
+  *   })
+  *   await next()
+  * })
+  * ```
+  */
   setRenderer = (renderer) => {
     this.#renderer = renderer;
   };
   /**
-   * `.header()` can set headers.
-   *
-   * @see {@link https://hono.dev/docs/api/context#header}
-   *
-   * @example
-   * ```ts
-   * app.get('/welcome', (c) => {
-   *   // Set headers
-   *   c.header('X-Message', 'Hello!')
-   *   c.header('Content-Type', 'text/plain')
-   *
-   *   // Append multiple headers using the append option (e.g. Vary)
-   *   c.header('Vary', 'Accept-Encoding', { append: true })
-   *   c.header('Vary', 'User-Agent', { append: true })
-   *
-   *   return c.body('Thank you for coming')
-   * })
-   * ```
-   */
+  * `.header()` can set headers.
+  *
+  * @see {@link https://hono.dev/docs/api/context#header}
+  *
+  * @example
+  * ```ts
+  * app.get('/welcome', (c) => {
+  *   // Set headers
+  *   c.header('X-Message', 'Hello!')
+  *   c.header('Content-Type', 'text/plain')
+  *
+  *   // Append multiple headers using the append option (e.g. Vary)
+  *   c.header('Vary', 'Accept-Encoding', { append: true })
+  *   c.header('Vary', 'User-Agent', { append: true })
+  *
+  *   return c.body('Thank you for coming')
+  * })
+  * ```
+  */
   header = (name2, value, options) => {
-    if (this.finalized) {
-      this.#res = createResponseInstance(this.#res.body, this.#res);
-    }
+    if (this.finalized) this.#res = createResponseInstance(this.#res.body, this.#res);
     const headers = this.#res ? this.#res.headers : this.#preparedHeaders ??= new Headers();
-    if (value === void 0) {
-      headers.delete(name2);
-    } else if (options?.append) {
-      headers.append(name2, value);
-    } else {
-      headers.set(name2, value);
-    }
+    if (value === void 0) headers.delete(name2);
+    else if (options?.append) headers.append(name2, value);
+    else headers.set(name2, value);
   };
   status = (status) => {
     this.#status = status;
   };
   /**
-   * `.set()` can set the value specified by the key.
-   *
-   * @see {@link https://hono.dev/docs/api/context#set-get}
-   *
-   * @example
-   * ```ts
-   * app.use('*', async (c, next) => {
-   *   c.set('message', 'Hono is hot!!')
-   *   await next()
-   * })
-   * ```
-   */
+  * `.set()` can set the value specified by the key.
+  *
+  * @see {@link https://hono.dev/docs/api/context#set-get}
+  *
+  * @example
+  * ```ts
+  * app.use('*', async (c, next) => {
+  *   c.set('message', 'Hono is hot!!')
+  *   await next()
+  * })
+  * ```
+  */
   set = (key, value) => {
     this.#var ??= /* @__PURE__ */ new Map();
     this.#var.set(key, value);
   };
   /**
-   * `.get()` can use the value specified by the key.
-   *
-   * @see {@link https://hono.dev/docs/api/context#set-get}
-   *
-   * @example
-   * ```ts
-   * app.get('/', (c) => {
-   *   const message = c.get('message')
-   *   return c.text(`The message is "${message}"`)
-   * })
-   * ```
-   */
+  * `.get()` can use the value specified by the key.
+  *
+  * @see {@link https://hono.dev/docs/api/context#set-get}
+  *
+  * @example
+  * ```ts
+  * app.get('/', (c) => {
+  *   const message = c.get('message')
+  *   return c.text(`The message is "${message}"`)
+  * })
+  * ```
+  */
   get = (key) => {
     return this.#var ? this.#var.get(key) : void 0;
   };
   /**
-   * `.var` can access the value of a variable.
-   *
-   * @see {@link https://hono.dev/docs/api/context#var}
-   *
-   * @example
-   * ```ts
-   * const result = c.var.client.oneMethod()
-   * ```
-   */
-  // c.var.propName is a read-only
+  * `.var` can access the value of a variable.
+  *
+  * @see {@link https://hono.dev/docs/api/context#var}
+  *
+  * @example
+  * ```ts
+  * const result = c.var.client.oneMethod()
+  * ```
+  */
   get var() {
-    if (!this.#var) {
-      return {};
-    }
+    if (!this.#var) return {};
     return Object.fromEntries(this.#var);
   }
   #newResponse(data, arg, headers) {
     let responseHeaders = this.#res ? new Headers(this.#res.headers) : this.#preparedHeaders;
     if (typeof arg === "object" && arg.headers) {
       responseHeaders ??= new Headers();
-      for (const [key, value] of new Headers(arg.headers)) {
-        if (key === "set-cookie") {
-          responseHeaders.append(key, value);
-        } else {
-          responseHeaders.set(key, value);
-        }
-      }
+      for (const [key, value] of new Headers(arg.headers)) if (key === "set-cookie") responseHeaders.append(key, value);
+      else responseHeaders.set(key, value);
     }
     if (headers) {
       if (!responseHeaders) {
         let count = 0;
-        for (const k2 in headers) {
-          if (++count > 1 || typeof headers[k2] !== "string") {
-            responseHeaders = new Headers();
-            break;
-          }
+        for (const k2 in headers) if (++count > 1 || typeof headers[k2] !== "string") {
+          responseHeaders = new Headers();
+          break;
         }
       }
-      if (responseHeaders) {
-        for (const k2 in headers) {
-          const v2 = headers[k2];
-          if (typeof v2 === "string") {
-            responseHeaders.set(k2, v2);
-          } else {
-            responseHeaders.delete(k2);
-            for (const v22 of v2) {
-              responseHeaders.append(k2, v22);
-            }
-          }
+      if (responseHeaders) for (const k2 in headers) {
+        const v2 = headers[k2];
+        if (typeof v2 === "string") responseHeaders.set(k2, v2);
+        else {
+          responseHeaders.delete(k2);
+          for (const v22 of v2) responseHeaders.append(k2, v22);
         }
       }
     }
@@ -26183,116 +27044,140 @@ var Context = class {
   }
   newResponse = (...args) => this.#newResponse(...args);
   /**
-   * `.body()` can return the HTTP response.
-   * You can set headers with `.header()` and set HTTP status code with `.status`.
-   * This can also be set in `.text()`, `.json()` and so on.
-   *
-   * @see {@link https://hono.dev/docs/api/context#body}
-   *
-   * @example
-   * ```ts
-   * app.get('/welcome', (c) => {
-   *   // Set headers
-   *   c.header('X-Message', 'Hello!')
-   *   c.header('Content-Type', 'text/plain')
-   *   // Set HTTP status code
-   *   c.status(201)
-   *
-   *   // Return the response body
-   *   return c.body('Thank you for coming')
-   * })
-   * ```
-   */
+  * `.body()` can return the HTTP response.
+  * You can set headers with `.header()` and set HTTP status code with `.status`.
+  * This can also be set in `.text()`, `.json()` and so on.
+  *
+  * @see {@link https://hono.dev/docs/api/context#body}
+  *
+  * @example
+  * ```ts
+  * app.get('/welcome', (c) => {
+  *   // Set headers
+  *   c.header('X-Message', 'Hello!')
+  *   c.header('Content-Type', 'text/plain')
+  *   // Set HTTP status code
+  *   c.status(201)
+  *
+  *   // Return the response body
+  *   return c.body('Thank you for coming')
+  * })
+  * ```
+  */
   body = (data, arg, headers) => this.#newResponse(data, arg, headers);
   /**
-   * `.text()` can render text as `Content-Type:text/plain`.
-   *
-   * @see {@link https://hono.dev/docs/api/context#text}
-   *
-   * @example
-   * ```ts
-   * app.get('/say', (c) => {
-   *   return c.text('Hello!')
-   * })
-   * ```
-   */
+  * `.text()` can render text as `Content-Type:text/plain`.
+  *
+  * @see {@link https://hono.dev/docs/api/context#text}
+  *
+  * @example
+  * ```ts
+  * app.get('/say', (c) => {
+  *   return c.text('Hello!')
+  * })
+  * ```
+  */
   text = (text4, arg, headers) => {
-    return !this.#preparedHeaders && !this.#status && !arg && !headers && !this.finalized ? new Response(text4) : this.#newResponse(
-      text4,
-      arg,
-      setDefaultContentType(TEXT_PLAIN, headers)
-    );
+    return !this.#preparedHeaders && !this.#status && !arg && !headers && !this.finalized ? new Response(text4) : this.#newResponse(text4, arg, setDefaultContentType(TEXT_PLAIN, headers));
   };
   /**
-   * `.json()` can render JSON as `Content-Type:application/json`.
-   *
-   * @see {@link https://hono.dev/docs/api/context#json}
-   *
-   * @example
-   * ```ts
-   * app.get('/api', (c) => {
-   *   return c.json({ message: 'Hello!' })
-   * })
-   * ```
-   */
+  * `.json()` can render JSON as `Content-Type:application/json`.
+  *
+  * @see {@link https://hono.dev/docs/api/context#json}
+  *
+  * @example
+  * ```ts
+  * app.get('/api', (c) => {
+  *   return c.json({ message: 'Hello!' })
+  * })
+  * ```
+  */
   json = (object2, arg, headers) => {
-    return this.#newResponse(
-      JSON.stringify(object2),
-      arg,
-      setDefaultContentType("application/json", headers)
-    );
+    return this.#newResponse(JSON.stringify(object2), arg, setDefaultContentType("application/json", headers));
   };
   html = (html, arg, headers) => {
     const res = (html2) => this.#newResponse(html2, arg, setDefaultContentType("text/html; charset=UTF-8", headers));
     return typeof html === "object" ? resolveCallback(html, HtmlEscapedCallbackPhase.Stringify, false, {}).then(res) : res(html);
   };
   /**
-   * `.redirect()` can Redirect, default status code is 302.
-   *
-   * @see {@link https://hono.dev/docs/api/context#redirect}
-   *
-   * @example
-   * ```ts
-   * app.get('/redirect', (c) => {
-   *   return c.redirect('/')
-   * })
-   * app.get('/redirect-permanently', (c) => {
-   *   return c.redirect('/', 301)
-   * })
-   * ```
-   */
+  * `.redirect()` can Redirect, default status code is 302.
+  *
+  * @see {@link https://hono.dev/docs/api/context#redirect}
+  *
+  * @example
+  * ```ts
+  * app.get('/redirect', (c) => {
+  *   return c.redirect('/')
+  * })
+  * app.get('/redirect-permanently', (c) => {
+  *   return c.redirect('/', 301)
+  * })
+  * ```
+  */
   redirect = (location, status) => {
     const locationString = String(location);
-    this.header(
-      "Location",
-      // Multibyes should be encoded
-      // eslint-disable-next-line no-control-regex
-      !/[^\x00-\xFF]/.test(locationString) ? locationString : encodeURI(locationString)
-    );
+    this.header("Location", !/[^\x00-\xFF]/.test(locationString) ? locationString : encodeURI(locationString));
     return this.newResponse(null, status ?? 302);
   };
   /**
-   * `.notFound()` can return the Not Found Response.
-   *
-   * @see {@link https://hono.dev/docs/api/context#notfound}
-   *
-   * @example
-   * ```ts
-   * app.get('/notfound', (c) => {
-   *   return c.notFound()
-   * })
-   * ```
-   */
+  * `.notFound()` can return the Not Found Response.
+  *
+  * @see {@link https://hono.dev/docs/api/context#notfound}
+  *
+  * @example
+  * ```ts
+  * app.get('/notfound', (c) => {
+  *   return c.notFound()
+  * })
+  * ```
+  */
   notFound = () => {
     this.#notFoundHandler ??= () => createResponseInstance();
     return this.#notFoundHandler(this);
   };
 };
 
+// node_modules/hono/dist/compose.js
+var compose = (middleware, onError, onNotFound) => {
+  return (context, next) => {
+    let index2 = -1;
+    return dispatch(0);
+    async function dispatch(i2) {
+      if (i2 <= index2) throw new Error("next() called multiple times");
+      index2 = i2;
+      let res;
+      let isError = false;
+      let handler;
+      if (middleware[i2]) {
+        handler = middleware[i2][0][0];
+        context.req.routeIndex = i2;
+      } else handler = i2 === middleware.length && next || void 0;
+      if (handler) try {
+        res = await handler(context, () => dispatch(i2 + 1));
+      } catch (err) {
+        if (err instanceof Error && onError) {
+          context.error = err;
+          res = await onError(err, context);
+          isError = true;
+        } else throw err;
+      }
+      else if (context.finalized === false && onNotFound) res = await onNotFound(context);
+      if (res && (context.finalized === false || isError)) context.res = res;
+      return context;
+    }
+  };
+};
+
 // node_modules/hono/dist/router.js
-var METHOD_NAME_ALL = "ALL";
-var METHOD_NAME_ALL_LOWERCASE = "all";
-var METHODS = ["get", "post", "put", "delete", "options", "patch", "query"];
+var METHODS = [
+  "get",
+  "post",
+  "put",
+  "delete",
+  "options",
+  "patch",
+  "query"
+];
 var MESSAGE_MATCHER_IS_ALREADY_BUILT = "Can not add a route since the matcher is already built.";
 var UnsupportedPathError = class extends Error {
 };
@@ -26312,7 +27197,7 @@ var errorHandler = (err, c2) => {
   console.error(err);
   return c2.text("Internal Server Error", 500);
 };
-var Hono = class _Hono {
+var Hono = class Hono2 {
   get;
   post;
   put;
@@ -26323,26 +27208,17 @@ var Hono = class _Hono {
   all;
   on;
   use;
-  /*
-    This class is like an abstract class and does not have a router.
-    To use it, inherit the class and implement router in the constructor.
-  */
   router;
   getPath;
-  // Cannot use `#` because it requires visibility at JavaScript runtime.
   _basePath = "/";
   #path = "/";
   routes = [];
   constructor(options = {}) {
-    const allMethods = [...METHODS, METHOD_NAME_ALL_LOWERCASE];
-    allMethods.forEach((method) => {
+    [...METHODS, "all"].forEach((method) => {
       this[method] = (args1, ...args) => {
         const methodName = method.toUpperCase();
-        if (typeof args1 === "string") {
-          this.#path = args1;
-        } else {
-          this.#addRoute(methodName, this.#path, args1);
-        }
+        if (typeof args1 === "string") this.#path = args1;
+        else this.#addRoute(methodName, this.#path, args1);
         args.forEach((handler) => {
           this.#addRoute(methodName, this.#path, handler);
         });
@@ -26354,22 +27230,19 @@ var Hono = class _Hono {
         this.#path = p2;
         for (const m2 of [method].flat()) {
           const methodName = m2.toUpperCase();
-          for (const handler of handlers) {
-            this.#addRoute(methodName, this.#path, handler);
-          }
+          for (const handler of handlers) this.#addRoute(methodName, this.#path, handler);
         }
       }
       return this;
     };
     this.use = (arg1, ...handlers) => {
-      if (typeof arg1 === "string") {
-        this.#path = arg1;
-      } else {
+      if (typeof arg1 === "string") this.#path = arg1;
+      else {
         this.#path = "*";
         handlers.unshift(arg1);
       }
       handlers.forEach((handler) => {
-        this.#addRoute(METHOD_NAME_ALL, this.#path, handler);
+        this.#addRoute("ALL", this.#path, handler);
       });
       return this;
     };
@@ -26378,7 +27251,7 @@ var Hono = class _Hono {
     this.getPath = strict ?? true ? options.getPath ?? getPath : getPathNoStrict;
   }
   #clone() {
-    const clone = new _Hono({
+    const clone = new Hono2({
       router: this.router,
       getPath: this.getPath
     });
@@ -26388,33 +27261,31 @@ var Hono = class _Hono {
     return clone;
   }
   #notFoundHandler = notFoundHandler;
-  // Cannot use `#` because it requires visibility at JavaScript runtime.
   errorHandler = errorHandler;
   /**
-   * `.route()` allows grouping other Hono instance in routes.
-   *
-   * @see {@link https://hono.dev/docs/api/routing#grouping}
-   *
-   * @param {string} path - base Path
-   * @param {Hono} app - other Hono instance
-   * @returns {Hono} routed Hono instance
-   *
-   * @example
-   * ```ts
-   * const app = new Hono()
-   * const app2 = new Hono()
-   *
-   * app2.get("/user", (c) => c.text("user"))
-   * app.route("/api", app2) // GET /api/user
-   * ```
-   */
+  * `.route()` allows grouping other Hono instance in routes.
+  *
+  * @see {@link https://hono.dev/docs/api/routing#grouping}
+  *
+  * @param {string} path - base Path
+  * @param {Hono} app - other Hono instance
+  * @returns {Hono} routed Hono instance
+  *
+  * @example
+  * ```ts
+  * const app = new Hono()
+  * const app2 = new Hono()
+  *
+  * app2.get("/user", (c) => c.text("user"))
+  * app.route("/api", app2) // GET /api/user
+  * ```
+  */
   route(path6, app2) {
     const subApp = this.basePath(path6);
     app2.routes.map((r2) => {
       let handler;
-      if (app2.errorHandler === errorHandler) {
-        handler = r2.handler;
-      } else {
+      if (app2.errorHandler === errorHandler) handler = r2.handler;
+      else {
         handler = async (c2, next) => (await compose([], app2.errorHandler)(c2, () => r2.handler(c2, next))).res;
         handler[COMPOSED_HANDLER] = r2.handler;
       }
@@ -26423,107 +27294,105 @@ var Hono = class _Hono {
     return this;
   }
   /**
-   * `.basePath()` allows base paths to be specified.
-   *
-   * @see {@link https://hono.dev/docs/api/routing#base-path}
-   *
-   * @param {string} path - base Path
-   * @returns {Hono} changed Hono instance
-   *
-   * @example
-   * ```ts
-   * const api = new Hono().basePath('/api')
-   * ```
-   */
+  * `.basePath()` allows base paths to be specified.
+  *
+  * @see {@link https://hono.dev/docs/api/routing#base-path}
+  *
+  * @param {string} path - base Path
+  * @returns {Hono} changed Hono instance
+  *
+  * @example
+  * ```ts
+  * const api = new Hono().basePath('/api')
+  * ```
+  */
   basePath(path6) {
     const subApp = this.#clone();
     subApp._basePath = mergePath(this._basePath, path6);
     return subApp;
   }
   /**
-   * `.onError()` handles an error and returns a customized Response.
-   *
-   * @see {@link https://hono.dev/docs/api/hono#error-handling}
-   *
-   * @param {ErrorHandler} handler - request Handler for error
-   * @returns {Hono} changed Hono instance
-   *
-   * @example
-   * ```ts
-   * app.onError((err, c) => {
-   *   console.error(`${err}`)
-   *   return c.text('Custom Error Message', 500)
-   * })
-   * ```
-   */
+  * `.onError()` handles an error and returns a customized Response.
+  *
+  * @see {@link https://hono.dev/docs/api/hono#error-handling}
+  *
+  * @param {ErrorHandler} handler - request Handler for error
+  * @returns {Hono} changed Hono instance
+  *
+  * @example
+  * ```ts
+  * app.onError((err, c) => {
+  *   console.error(`${err}`)
+  *   return c.text('Custom Error Message', 500)
+  * })
+  * ```
+  */
   onError = (handler) => {
     this.errorHandler = handler;
     return this;
   };
   /**
-   * `.notFound()` allows you to customize a Not Found Response.
-   *
-   * @see {@link https://hono.dev/docs/api/hono#not-found}
-   *
-   * @param {NotFoundHandler} handler - request handler for not-found
-   * @returns {Hono} changed Hono instance
-   *
-   * @example
-   * ```ts
-   * app.notFound((c) => {
-   *   return c.text('Custom 404 Message', 404)
-   * })
-   * ```
-   */
+  * `.notFound()` allows you to customize a Not Found Response.
+  *
+  * @see {@link https://hono.dev/docs/api/hono#not-found}
+  *
+  * @param {NotFoundHandler} handler - request handler for not-found
+  * @returns {Hono} changed Hono instance
+  *
+  * @example
+  * ```ts
+  * app.notFound((c) => {
+  *   return c.text('Custom 404 Message', 404)
+  * })
+  * ```
+  */
   notFound = (handler) => {
     this.#notFoundHandler = handler;
     return this;
   };
   /**
-   * `.mount()` allows you to mount applications built with other frameworks into your Hono application.
-   *
-   * @see {@link https://hono.dev/docs/api/hono#mount}
-   *
-   * @param {string} path - base Path
-   * @param {Function} applicationHandler - other Request Handler
-   * @param {MountOptions} [options] - options of `.mount()`
-   * @returns {Hono} mounted Hono instance
-   *
-   * @example
-   * ```ts
-   * import { Router as IttyRouter } from 'itty-router'
-   * import { Hono } from 'hono'
-   * // Create itty-router application
-   * const ittyRouter = IttyRouter()
-   * // GET /itty-router/hello
-   * ittyRouter.get('/hello', () => new Response('Hello from itty-router'))
-   *
-   * const app = new Hono()
-   * app.mount('/itty-router', ittyRouter.handle)
-   * ```
-   *
-   * @example
-   * ```ts
-   * const app = new Hono()
-   * // Send the request to another application without modification.
-   * app.mount('/app', anotherApp, {
-   *   replaceRequest: (req) => req,
-   * })
-   * ```
-   */
+  * `.mount()` allows you to mount applications built with other frameworks into your Hono application.
+  *
+  * @deprecated Use `mount()` from `hono/mount` instead. `.mount()` will be removed in v5.
+  *
+  * @see {@link https://hono.dev/docs/api/hono#mount}
+  *
+  * @param {string} path - base Path
+  * @param {Function} applicationHandler - other Request Handler
+  * @param {MountOptions} [options] - options of `.mount()`
+  * @returns {Hono} mounted Hono instance
+  *
+  * @example
+  * ```ts
+  * import { Router as IttyRouter } from 'itty-router'
+  * import { Hono } from 'hono'
+  * // Create itty-router application
+  * const ittyRouter = IttyRouter()
+  * // GET /itty-router/hello
+  * ittyRouter.get('/hello', () => new Response('Hello from itty-router'))
+  *
+  * const app = new Hono()
+  * app.mount('/itty-router', ittyRouter.handle)
+  * ```
+  *
+  * @example
+  * ```ts
+  * const app = new Hono()
+  * // Send the request to another application without modification.
+  * app.mount('/app', anotherApp, {
+  *   replaceRequest: (req) => req,
+  * })
+  * ```
+  */
   mount(path6, applicationHandler, options) {
     let replaceRequest;
     let optionHandler;
     if (options) {
-      if (typeof options === "function") {
-        optionHandler = options;
-      } else {
+      if (typeof options === "function") optionHandler = options;
+      else {
         optionHandler = options.optionHandler;
-        if (options.replaceRequest === false) {
-          replaceRequest = (request) => request;
-        } else {
-          replaceRequest = options.replaceRequest;
-        }
+        if (options.replaceRequest === false) replaceRequest = (request) => request;
+        else replaceRequest = options.replaceRequest;
       }
     }
     const getOptions = optionHandler ? (c2) => {
@@ -26548,12 +27417,10 @@ var Hono = class _Hono {
     })();
     const handler = async (c2, next) => {
       const res = await applicationHandler(replaceRequest(c2.req.raw), ...getOptions(c2));
-      if (res) {
-        return res;
-      }
+      if (res) return res;
       await next();
     };
-    this.#addRoute(METHOD_NAME_ALL, mergePath(path6, "*"), handler);
+    this.#addRoute("ALL", mergePath(path6, "*"), handler);
     return this;
   }
   #addRoute(method, path6, handler, baseRoutePath) {
@@ -26568,15 +27435,11 @@ var Hono = class _Hono {
     this.routes.push(r2);
   }
   #handleError(err, c2) {
-    if (err instanceof Error) {
-      return this.errorHandler(err, c2);
-    }
+    if (err instanceof Error) return this.errorHandler(err, c2);
     throw err;
   }
   #dispatch(request, executionCtx, env, method) {
-    if (method === "HEAD") {
-      return (async () => new Response(null, await this.#dispatch(request, executionCtx, env, "GET")))();
-    }
+    if (method === "HEAD") return (async () => new Response(null, await this.#dispatch(request, executionCtx, env, "GET")))();
     const path6 = this.getPath(request, { env });
     const matchResult = this.router.match(method, path6);
     const c2 = new Context(request, {
@@ -26595,19 +27458,13 @@ var Hono = class _Hono {
       } catch (err) {
         return this.#handleError(err, c2);
       }
-      return res instanceof Promise ? res.then(
-        (resolved) => resolved || (c2.finalized ? c2.res : this.#notFoundHandler(c2))
-      ).catch((err) => this.#handleError(err, c2)) : res ?? this.#notFoundHandler(c2);
+      return res instanceof Promise ? res.then((resolved) => resolved || (c2.finalized ? c2.res : this.#notFoundHandler(c2))).catch((err) => this.#handleError(err, c2)) : res ?? this.#notFoundHandler(c2);
     }
     const composed = compose(matchResult[0], this.errorHandler, this.#notFoundHandler);
     return (async () => {
       try {
         const context = await composed(c2);
-        if (!context.finalized) {
-          throw new Error(
-            "Context is not finalized. Did you forget to return a Response object or `await next()`?"
-          );
-        }
+        if (!context.finalized) throw new Error("Context is not finalized. Did you forget to return a Response object or `await next()`?");
         return context.res;
       } catch (err) {
         return this.#handleError(err, c2);
@@ -26615,62 +27472,53 @@ var Hono = class _Hono {
     })();
   }
   /**
-   * `.fetch()` will be entry point of your app.
-   *
-   * @see {@link https://hono.dev/docs/api/hono#fetch}
-   *
-   * @param {Request} request - request Object of request
-   * @param {Env} env - env Object
-   * @param {ExecutionContext} executionCtx - context of execution
-   * @returns {Response | Promise<Response>} response of request
-   *
-   */
+  * `.fetch()` will be entry point of your app.
+  *
+  * @see {@link https://hono.dev/docs/api/hono#fetch}
+  *
+  * @param {Request} request - request Object of request
+  * @param {Env} env - env Object
+  * @param {ExecutionContext} executionCtx - context of execution
+  * @returns {Response | Promise<Response>} response of request
+  *
+  */
   fetch = (request, ...rest) => {
     return this.#dispatch(request, rest[1], rest[0], request.method);
   };
   /**
-   * `.request()` is a useful method for testing.
-   * You can pass a URL or pathname to send a GET request.
-   * app will return a Response object.
-   * ```ts
-   * test('GET /hello is ok', async () => {
-   *   const res = await app.request('/hello')
-   *   expect(res.status).toBe(200)
-   * })
-   * ```
-   * @see https://hono.dev/docs/api/hono#request
-   */
+  * `.request()` is a useful method for testing.
+  * You can pass a URL or pathname to send a GET request.
+  * app will return a Response object.
+  * ```ts
+  * test('GET /hello is ok', async () => {
+  *   const res = await app.request('/hello')
+  *   expect(res.status).toBe(200)
+  * })
+  * ```
+  * @see https://hono.dev/docs/api/hono#request
+  */
   request = (input, requestInit, Env, executionCtx) => {
-    if (input instanceof Request) {
-      return this.fetch(requestInit ? new Request(input, requestInit) : input, Env, executionCtx);
-    }
+    if (input instanceof Request) return this.fetch(requestInit ? new Request(input, requestInit) : input, Env, executionCtx);
     input = input.toString();
-    return this.fetch(
-      new Request(
-        /^https?:\/\//.test(input) ? input : `http://localhost${mergePath("/", input)}`,
-        requestInit
-      ),
-      Env,
-      executionCtx
-    );
+    return this.fetch(new Request(/^https?:\/\//.test(input) ? input : `http://localhost${mergePath("/", input)}`, requestInit), Env, executionCtx);
   };
   /**
-   * `.fire()` automatically adds a global fetch event listener.
-   * This can be useful for environments that adhere to the Service Worker API, such as non-ES module Cloudflare Workers.
-   * @deprecated
-   * Use `fire` from `hono/service-worker` instead.
-   * ```ts
-   * import { Hono } from 'hono'
-   * import { fire } from 'hono/service-worker'
-   *
-   * const app = new Hono()
-   * // ...
-   * fire(app)
-   * ```
-   * @see https://hono.dev/docs/api/hono#fire
-   * @see https://developer.mozilla.org/en-US/docs/Web/API/Service_Worker_API
-   * @see https://developers.cloudflare.com/workers/reference/migrate-to-module-workers/
-   */
+  * `.fire()` automatically adds a global fetch event listener.
+  * This can be useful for environments that adhere to the Service Worker API, such as non-ES module Cloudflare Workers.
+  * @deprecated
+  * Use `fire` from `hono/service-worker` instead.
+  * ```ts
+  * import { Hono } from 'hono'
+  * import { fire } from 'hono/service-worker'
+  *
+  * const app = new Hono()
+  * // ...
+  * fire(app)
+  * ```
+  * @see https://hono.dev/docs/api/hono#fire
+  * @see https://developer.mozilla.org/en-US/docs/Web/API/Service_Worker_API
+  * @see https://developers.cloudflare.com/workers/reference/migrate-to-module-workers/
+  */
   fire = () => {
     addEventListener("fetch", (event) => {
       event.respondWith(this.#dispatch(event.request, event, void 0, event.request.method));
@@ -26685,16 +27533,12 @@ var createNullObject = () => /* @__PURE__ */ Object.create(null);
 var emptyParam = [];
 function match(method, path6) {
   const matchers = this.buildAllMatchers();
-  const match2 = ((method2, path22) => {
-    const matcher = matchers[method2] || matchers[METHOD_NAME_ALL];
-    const staticMatch = matcher[2][path22];
-    if (staticMatch) {
-      return staticMatch;
-    }
-    const match3 = path22.match(matcher[0]);
-    if (!match3) {
-      return [[], emptyParam];
-    }
+  const match2 = ((method2, path7) => {
+    const matcher = matchers[method2] || matchers["ALL"];
+    const staticMatch = matcher[2][path7];
+    if (staticMatch) return staticMatch;
+    const match3 = path7.match(matcher[0]);
+    if (!match3) return [[], emptyParam];
     const index2 = match3.indexOf("", 1);
     return [matcher[1][index2], match3];
   });
@@ -26704,31 +27548,19 @@ function match(method, path6) {
 
 // node_modules/hono/dist/router/reg-exp-router/node.js
 var LABEL_REG_EXP_STR = "[^/]+";
-var ONLY_WILDCARD_REG_EXP_STR = ".*";
 var TAIL_WILDCARD_REG_EXP_STR = "(?:|/.*)";
 var PATH_ERROR = /* @__PURE__ */ Symbol();
-var regExpMetaChars = new Set(".\\+*[^]$()");
+var regExpMetaChars = /* @__PURE__ */ new Set(".\\+*[^]$()");
 function compareKey(a2, b2) {
-  if (a2.length === 1) {
-    return b2.length === 1 ? a2 < b2 ? -1 : 1 : -1;
-  }
-  if (b2.length === 1) {
-    return 1;
-  }
-  if (a2 === ONLY_WILDCARD_REG_EXP_STR || a2 === TAIL_WILDCARD_REG_EXP_STR) {
-    return b2 === TAIL_WILDCARD_REG_EXP_STR ? -1 : 1;
-  } else if (b2 === ONLY_WILDCARD_REG_EXP_STR || b2 === TAIL_WILDCARD_REG_EXP_STR) {
-    return -1;
-  }
-  if (a2 === LABEL_REG_EXP_STR) {
-    return 1;
-  } else if (b2 === LABEL_REG_EXP_STR) {
-    return -1;
-  }
+  if (a2.length === 1) return b2.length === 1 ? a2 < b2 ? -1 : 1 : -1;
+  if (b2.length === 1) return 1;
+  if (a2 === ".*" || a2 === "(?:|/.*)") return b2 === "(?:|/.*)" ? -1 : 1;
+  else if (b2 === ".*" || b2 === "(?:|/.*)") return -1;
+  if (a2 === "[^/]+") return 1;
+  else if (b2 === "[^/]+") return -1;
   return a2.length === b2.length ? a2 < b2 ? -1 : 1 : b2.length - a2.length;
 }
-var Node = class _Node {
-  // handler index of a dynamic path, or -1 for a static path terminal
+var Node = class Node2 {
   #index;
   #varIndex;
   #children = createNullObject();
@@ -26736,36 +27568,35 @@ var Node = class _Node {
     let node = this;
     for (let i2 = 0, len = tokens.length; i2 < len; i2++) {
       const token = tokens[i2];
-      const pattern = token.length === 1 ? token === "*" ? i2 === len - 1 ? ["", "", ONLY_WILDCARD_REG_EXP_STR] : ["", "", LABEL_REG_EXP_STR] : null : token === "/*" ? ["", "", TAIL_WILDCARD_REG_EXP_STR] : token.match(/^\:([^\{\}]+)(?:\{(.+)\})?$/);
+      const pattern = token.length === 1 ? token === "*" ? i2 === len - 1 ? [
+        "",
+        "",
+        ".*"
+      ] : [
+        "",
+        "",
+        LABEL_REG_EXP_STR
+      ] : null : token === "/*" ? [
+        "",
+        "",
+        TAIL_WILDCARD_REG_EXP_STR
+      ] : token.match(/^\:([^\{\}]+)(?:\{(.+)\})?$/);
       let nextNode;
       if (pattern) {
         const name2 = pattern[1];
-        let regexpStr = pattern[2] || LABEL_REG_EXP_STR;
+        let regexpStr = pattern[2] || "[^/]+";
         if (name2 && pattern[2]) {
-          if (regexpStr === ".*") {
-            throw PATH_ERROR;
-          }
+          if (regexpStr === ".*") throw PATH_ERROR;
           regexpStr = regexpStr.replace(/^\((?!\?:)(?=[^)]+\)$)/, "(?:");
-          if (/\((?!\?:)/.test(regexpStr)) {
-            throw PATH_ERROR;
-          }
-          if (regexpStr.length === 1 && regExpMetaChars.has(regexpStr)) {
-            throw PATH_ERROR;
-          }
+          if (/\((?!\?:)/.test(regexpStr)) throw PATH_ERROR;
+          if (regexpStr.length === 1 && regExpMetaChars.has(regexpStr)) throw PATH_ERROR;
         }
         nextNode = node.#children[regexpStr];
         if (!nextNode) {
-          if (regexpStr !== ONLY_WILDCARD_REG_EXP_STR && regexpStr !== TAIL_WILDCARD_REG_EXP_STR) {
-            for (const k2 in node.#children) {
-              if (
-                // a single-char pattern coexists with single-char literals as a literal does
-                (regexpStr.length > 1 || k2.length > 1) && k2 !== ONLY_WILDCARD_REG_EXP_STR && k2 !== TAIL_WILDCARD_REG_EXP_STR
-              ) {
-                throw PATH_ERROR;
-              }
-            }
+          if (regexpStr !== ".*" && regexpStr !== "(?:|/.*)") {
+            for (const k2 in node.#children) if ((regexpStr.length > 1 || k2.length > 1) && k2 !== ".*" && k2 !== "(?:|/.*)") throw PATH_ERROR;
           }
-          nextNode = node.#children[regexpStr] = new _Node();
+          nextNode = node.#children[regexpStr] = new Node2();
         }
         if (name2 !== "") {
           nextNode.#varIndex ??= context.varIndex++;
@@ -26774,37 +27605,24 @@ var Node = class _Node {
       } else {
         nextNode = node.#children[token];
         if (!nextNode) {
-          for (const k2 in node.#children) {
-            if (k2.length > 1 && k2 !== ONLY_WILDCARD_REG_EXP_STR && k2 !== TAIL_WILDCARD_REG_EXP_STR) {
-              throw PATH_ERROR;
-            }
-          }
-          nextNode = node.#children[token] = new _Node();
+          for (const k2 in node.#children) if (k2.length > 1 && k2 !== ".*" && k2 !== "(?:|/.*)") throw PATH_ERROR;
+          nextNode = node.#children[token] = new Node2();
         }
       }
       node = nextNode;
     }
-    if (node.#index !== void 0) {
-      throw PATH_ERROR;
-    }
+    if (node.#index !== void 0) throw PATH_ERROR;
     node.#index = isStatic ? -1 : index2;
   }
   buildRegExpStr() {
-    const childKeys = Object.keys(this.#children).sort(compareKey);
-    const strList = childKeys.map((k2) => {
+    const strList = Object.keys(this.#children).sort(compareKey).map((k2) => {
       const c2 = this.#children[k2];
       const childStr = c2.buildRegExpStr();
       return childStr === "" ? "" : (typeof c2.#varIndex === "number" ? `(${k2})@${c2.#varIndex}` : regExpMetaChars.has(k2) ? `\\${k2}` : k2) + childStr;
     }).filter(Boolean);
-    if (typeof this.#index === "number" && this.#index !== -1) {
-      strList.unshift(`#${this.#index}`);
-    }
-    if (strList.length === 0) {
-      return "";
-    }
-    if (strList.length === 1) {
-      return strList[0];
-    }
+    if (typeof this.#index === "number" && this.#index !== -1) strList.unshift(`#${this.#index}`);
+    if (strList.length === 0) return "";
+    if (strList.length === 1) return strList[0];
     return "(?:" + strList.join("|") + ")";
   }
 };
@@ -26814,7 +27632,6 @@ var Trie = class {
   #context = { varIndex: 0 };
   #root = new Node();
   #index = 0;
-  // dynamic path -> [handler index, param assoc]; static paths are not registered
   paths = createNullObject();
   insert(path6, isStatic) {
     if (isStatic) {
@@ -26833,18 +27650,14 @@ var Trie = class {
         replaced = true;
         return mark;
       });
-      if (!replaced) {
-        break;
-      }
+      if (!replaced) break;
     }
     const tokens = markedPath.match(/(?::[^\/]+)|(?:\/\*$)|./g) || [];
     for (let i2 = groups.length - 1; i2 >= 0; i2--) {
       const [mark] = groups[i2];
-      for (let j2 = tokens.length - 1; j2 >= 0; j2--) {
-        if (tokens[j2].indexOf(mark) !== -1) {
-          tokens[j2] = tokens[j2].replace(mark, groups[i2][1]);
-          break;
-        }
+      for (let j2 = tokens.length - 1; j2 >= 0; j2--) if (tokens[j2].indexOf(mark) !== -1) {
+        tokens[j2] = tokens[j2].replace(mark, groups[i2][1]);
+        break;
       }
     }
     this.#root.insert(tokens, this.#index, paramAssoc, this.#context, false);
@@ -26852,9 +27665,11 @@ var Trie = class {
   }
   buildRegExp() {
     let regexp = this.#root.buildRegExpStr();
-    if (regexp === "") {
-      return [/^$/, [], []];
-    }
+    if (regexp === "") return [
+      /^$/,
+      [],
+      []
+    ];
     let captureIndex = 0;
     const indexReplacementMap = [];
     const paramReplacementMap = [];
@@ -26869,27 +27684,21 @@ var Trie = class {
       }
       return "";
     });
-    return [new RegExp(`^${regexp}`), indexReplacementMap, paramReplacementMap];
+    return [
+      new RegExp(`^${regexp}`),
+      indexReplacementMap,
+      paramReplacementMap
+    ];
   }
 };
 
 // node_modules/hono/dist/router/reg-exp-router/router.js
 var wildcardRegExpCache = createNullObject();
 function buildWildcardRegExp(path6) {
-  return wildcardRegExpCache[path6] ??= new RegExp(
-    `^${path6.replace(
-      /\/:[^/{}]+(?:\{\[\^\/]\+})?(?=[/{]|$)|\/?\*$|([.\\+*[^\]$()?{}|])/g,
-      (match2, metaChar) => metaChar ? `\\${metaChar}` : match2 === "/*" ? TAIL_WILDCARD_REG_EXP_STR : match2 === "*" ? ONLY_WILDCARD_REG_EXP_STR : `/:${LABEL_REG_EXP_STR}`
-    )}$`
-  );
+  return wildcardRegExpCache[path6] ??= new RegExp(`^${path6.replace(/\/:[^/{}]+(?:\{\[\^\/]\+})?(?=[/{]|$)|\/?\*$|([.\\+*[^\]$()?{}|])/g, (match2, metaChar) => metaChar ? `\\${metaChar}` : match2 === "/*" ? TAIL_WILDCARD_REG_EXP_STR : match2 === "*" ? ".*" : `/:${LABEL_REG_EXP_STR}`)}$`);
 }
 function findMiddleware(middleware, path6) {
-  for (const k2 of Object.keys(middleware).sort((a2, b2) => b2.length - a2.length)) {
-    if (buildWildcardRegExp(k2).test(path6)) {
-      return [...middleware[k2]];
-    }
-  }
-  return void 0;
+  for (const k2 of Object.keys(middleware).sort((a2, b2) => b2.length - a2.length)) if (buildWildcardRegExp(k2).test(path6)) return [...middleware[k2]];
 }
 var RegExpRouter = class {
   name = "RegExpRouter";
@@ -26897,9 +27706,9 @@ var RegExpRouter = class {
   #routes;
   #tries;
   constructor() {
-    this.#middleware = { [METHOD_NAME_ALL]: createNullObject() };
-    this.#routes = { [METHOD_NAME_ALL]: createNullObject() };
-    this.#tries = { [METHOD_NAME_ALL]: new Trie() };
+    this.#middleware = { ["ALL"]: createNullObject() };
+    this.#routes = { ["ALL"]: createNullObject() };
+    this.#tries = { ["ALL"]: new Trie() };
   }
   #insertPath(method, path6) {
     try {
@@ -26911,57 +27720,41 @@ var RegExpRouter = class {
   add(method, path6, handler) {
     const middleware = this.#middleware;
     const routes = this.#routes;
-    if (!middleware) {
-      throw new Error(MESSAGE_MATCHER_IS_ALREADY_BUILT);
-    }
+    if (!middleware) throw new Error(MESSAGE_MATCHER_IS_ALREADY_BUILT);
     if (!middleware[method]) {
       this.#tries[method] = new Trie();
       for (const handlerMap of [middleware, routes]) {
         handlerMap[method] = createNullObject();
-        for (const p2 in handlerMap[METHOD_NAME_ALL]) {
-          handlerMap[method][p2] = [...handlerMap[METHOD_NAME_ALL][p2]];
+        for (const p2 in handlerMap["ALL"]) {
+          handlerMap[method][p2] = [...handlerMap["ALL"][p2]];
           this.#insertPath(method, p2);
         }
       }
     }
-    if (path6 === "/*") {
-      path6 = "*";
-    }
-    const methods = method === METHOD_NAME_ALL ? Object.keys(middleware) : [method];
+    if (path6 === "/*") path6 = "*";
+    const methods = method === "ALL" ? Object.keys(middleware) : [method];
     if (/\*$/.test(path6)) {
       const re2 = buildWildcardRegExp(path6);
-      for (const m2 of methods) {
-        if (!middleware[m2][path6]) {
-          this.#insertPath(m2, path6);
-          middleware[m2][path6] = findMiddleware(middleware[m2], path6) || findMiddleware(middleware[METHOD_NAME_ALL], path6) || [];
-        }
+      for (const m2 of methods) if (!middleware[m2][path6]) {
+        this.#insertPath(m2, path6);
+        middleware[m2][path6] = findMiddleware(middleware[m2], path6) || findMiddleware(middleware["ALL"], path6) || [];
       }
-      for (const handlerMap of [middleware, routes]) {
-        for (const m2 of methods) {
-          for (const p2 in handlerMap[m2]) {
-            re2.test(p2) && handlerMap[m2][p2].push([handler, path6]);
-          }
-        }
-      }
+      for (const handlerMap of [middleware, routes]) for (const m2 of methods) for (const p2 in handlerMap[m2]) re2.test(p2) && handlerMap[m2][p2].push([handler, path6]);
       return;
     }
     const paths = checkOptionalParameter(path6) || [path6];
-    for (const path22 of paths) {
-      for (const m2 of methods) {
-        if (!routes[m2][path22]) {
-          this.#insertPath(m2, path22);
-          routes[m2][path22] = findMiddleware(middleware[m2], path22) || findMiddleware(middleware[METHOD_NAME_ALL], path22) || [];
-        }
-        routes[m2][path22].push([handler, path22]);
+    for (const path7 of paths) for (const m2 of methods) {
+      if (!routes[m2][path7]) {
+        this.#insertPath(m2, path7);
+        routes[m2][path7] = findMiddleware(middleware[m2], path7) || findMiddleware(middleware["ALL"], path7) || [];
       }
+      routes[m2][path7].push([handler, path7]);
     }
   }
   match = match;
   buildAllMatchers() {
     const matchers = createNullObject();
-    for (const method of Object.keys(this.#routes)) {
-      matchers[method] = this.#buildMatcher(method);
-    }
+    for (const method of Object.keys(this.#routes)) matchers[method] = this.#buildMatcher(method);
     this.#middleware = this.#routes = this.#tries = void 0;
     wildcardRegExpCache = createNullObject();
     return matchers;
@@ -26973,24 +27766,23 @@ var RegExpRouter = class {
     const staticMap = createNullObject();
     const handlerData = [];
     const [regexp, indexReplacementMap, paramReplacementMap] = trie.buildRegExp();
-    for (const r2 of [middleware, routes]) {
-      for (const path6 in r2) {
-        const handlers = r2[path6];
-        const pathData = trie.paths[path6];
-        if (!pathData) {
-          staticMap[path6] = [handlers.map(([h2]) => [h2, createNullObject()]), emptyParam];
-          continue;
-        }
-        handlerData[pathData[0]] = handlers.map(([h2, handlerPath]) => [
-          h2,
-          trie.paths[handlerPath][1].reduceRight((map2, [key], i2) => {
-            map2[key] = paramReplacementMap[pathData[1][i2][1]];
-            return map2;
-          }, createNullObject())
-        ]);
+    for (const r2 of [middleware, routes]) for (const path6 in r2) {
+      const handlers = r2[path6];
+      const pathData = trie.paths[path6];
+      if (!pathData) {
+        staticMap[path6] = [handlers.map(([h2]) => [h2, createNullObject()]), emptyParam];
+        continue;
       }
+      handlerData[pathData[0]] = handlers.map(([h2, handlerPath]) => [h2, trie.paths[handlerPath][1].reduceRight((map2, [key], i2) => {
+        map2[key] = paramReplacementMap[pathData[1][i2][1]];
+        return map2;
+      }, createNullObject())]);
     }
-    return [regexp, indexReplacementMap.map((i2) => handlerData[i2]), staticMap];
+    return [
+      regexp,
+      indexReplacementMap.map((i2) => handlerData[i2]),
+      staticMap
+    ];
   }
 };
 
@@ -27003,15 +27795,15 @@ var SmartRouter = class {
     this.#routers = init.routers;
   }
   add(method, path6, handler) {
-    if (!this.#routes) {
-      throw new Error(MESSAGE_MATCHER_IS_ALREADY_BUILT);
-    }
-    this.#routes.push([method, path6, handler]);
+    if (!this.#routes) throw new Error(MESSAGE_MATCHER_IS_ALREADY_BUILT);
+    this.#routes.push([
+      method,
+      path6,
+      handler
+    ]);
   }
   match(method, path6) {
-    if (!this.#routes) {
-      throw new Error("Fatal error");
-    }
+    if (!this.#routes) throw new Error("Fatal error");
     const routers = this.#routers;
     const routes = this.#routes;
     const len = routers.length;
@@ -27020,14 +27812,10 @@ var SmartRouter = class {
     for (; i2 < len; i2++) {
       const router = routers[i2];
       try {
-        for (let i22 = 0, len2 = routes.length; i22 < len2; i22++) {
-          router.add(...routes[i22]);
-        }
+        for (let i3 = 0, len2 = routes.length; i3 < len2; i3++) router.add(...routes[i3]);
         res = router.match(method, path6);
       } catch (e2) {
-        if (e2 instanceof UnsupportedPathError) {
-          continue;
-        }
+        if (e2 instanceof UnsupportedPathError) continue;
         throw e2;
       }
       this.match = router.match.bind(router);
@@ -27035,16 +27823,12 @@ var SmartRouter = class {
       this.#routes = void 0;
       break;
     }
-    if (i2 === len) {
-      throw new Error("Fatal error");
-    }
+    if (i2 === len) throw new Error("Fatal error");
     this.name = `SmartRouter + ${this.activeRouter.name}`;
     return res;
   }
   get activeRouter() {
-    if (this.#routes || this.#routers.length !== 1) {
-      throw new Error("No active router has been determined yet.");
-    }
+    if (this.#routes || this.#routers.length !== 1) throw new Error("No active router has been determined yet.");
     return this.#routers[0];
   }
 };
@@ -27052,7 +27836,7 @@ var SmartRouter = class {
 // node_modules/hono/dist/router/trie-router/node.js
 var emptyParams = createNullObject();
 var order = 0;
-var Node2 = class _Node2 {
+var Node3 = class Node4 {
   #methods = [];
   #children = createNullObject();
   #patterns = [];
@@ -27068,34 +27852,30 @@ var Node2 = class _Node2 {
       const pattern = getPattern(p2, nextP) || (nextP === void 0 && p2 && p2.indexOf("*") === p2.length - 1 ? p2 : null);
       const isParam = Array.isArray(pattern);
       const key = isParam ? pattern[0] : pattern || p2;
-      const child = curNode.#children[key] ||= new _Node2();
+      const child = curNode.#children[key] ||= new Node4();
       if (pattern && !child.#pattern) {
         child.#pattern = pattern;
         curNode.#patterns.push(child);
       }
       curNode = child;
-      if (isParam) {
-        possibleKeys.add(pattern[1]);
-      }
+      if (isParam) possibleKeys.add(pattern[1]);
     }
-    curNode.#methods.push({
-      [method]: {
-        handler,
-        possibleKeys: [...possibleKeys],
-        score: ++order
-      }
-    });
+    curNode.#methods.push({ [method]: {
+      handler,
+      possibleKeys: [...possibleKeys],
+      score: ++order
+    } });
   }
   #pushHandlerSets(handlerSets, node, method, nodeParams, params) {
     for (let i2 = 0, len = node.#methods.length; i2 < len; i2++) {
       const m2 = node.#methods[i2];
-      const handlerSet = m2[method] || m2[METHOD_NAME_ALL];
+      const handlerSet = m2[method] || m2["ALL"];
       if (handlerSet) {
         handlerSet.params = createNullObject();
         handlerSets.push(handlerSet);
-        for (let i22 = 0, len2 = handlerSet.possibleKeys.length; i22 < len2; i22++) {
-          const key = handlerSet.possibleKeys[i22];
-          handlerSet.params[key] = params?.[key] && !i22 ? params[key] : nodeParams[key] ?? params?.[key];
+        for (let i3 = 0, len2 = handlerSet.possibleKeys.length; i3 < len2; i3++) {
+          const key = handlerSet.possibleKeys[i3];
+          handlerSet.params[key] = params?.[key] && !i3 ? params[key] : nodeParams[key] ?? params?.[key];
         }
       }
     }
@@ -27103,8 +27883,7 @@ var Node2 = class _Node2 {
   search(method, path6) {
     const handlerSets = [];
     this.#params = emptyParams;
-    const curNode = this;
-    let curNodes = [curNode];
+    let curNodes = [this];
     const parts = splitPath(path6);
     const curNodesQueue = [];
     const len = parts.length;
@@ -27119,13 +27898,9 @@ var Node2 = class _Node2 {
         if (nextNode) {
           nextNode.#params = node.#params;
           if (isLast) {
-            if (nextNode.#children["*"]) {
-              this.#pushHandlerSets(handlerSets, nextNode.#children["*"], method, node.#params);
-            }
+            if (nextNode.#children["*"]) this.#pushHandlerSets(handlerSets, nextNode.#children["*"], method, node.#params);
             this.#pushHandlerSets(handlerSets, nextNode, method, node.#params);
-          } else {
-            tempNodes.push(nextNode);
-          }
+          } else tempNodes.push(nextNode);
         }
         for (const child of node.#patterns) {
           const pattern = child.#pattern;
@@ -27141,9 +27916,7 @@ var Node2 = class _Node2 {
             continue;
           }
           const [, name2, matcher] = pattern;
-          if (!part && matcher === true) {
-            continue;
-          }
+          if (!part && matcher === true) continue;
           if (matcher !== true) {
             if (!partOffsets) {
               partOffsets = [];
@@ -27158,20 +27931,11 @@ var Node2 = class _Node2 {
             if (m2) {
               params[name2] = m2[0];
               this.#pushHandlerSets(handlerSets, child, method, node.#params, params);
-              if (m2[0].length === restPathString.length && child.#children["*"]) {
-                this.#pushHandlerSets(
-                  handlerSets,
-                  child.#children["*"],
-                  method,
-                  node.#params,
-                  params
-                );
-              }
+              if (m2[0].length === restPathString.length && child.#children["*"]) this.#pushHandlerSets(handlerSets, child.#children["*"], method, node.#params, params);
               for (const _2 in child.#children) {
                 child.#params = params;
                 const componentCount = m2[0].match(/\//g)?.length ?? 0;
-                const targetCurNodes = curNodesQueue[componentCount] ||= [];
-                targetCurNodes.push(child);
+                (curNodesQueue[componentCount] ||= []).push(child);
                 break;
               }
               continue;
@@ -27181,15 +27945,7 @@ var Node2 = class _Node2 {
             params[name2] = part;
             if (isLast) {
               this.#pushHandlerSets(handlerSets, child, method, params, node.#params);
-              if (child.#children["*"]) {
-                this.#pushHandlerSets(
-                  handlerSets,
-                  child.#children["*"],
-                  method,
-                  params,
-                  node.#params
-                );
-              }
+              if (child.#children["*"]) this.#pushHandlerSets(handlerSets, child.#children["*"], method, params, node.#params);
             } else {
               child.#params = params;
               tempNodes.push(child);
@@ -27200,11 +27956,9 @@ var Node2 = class _Node2 {
       const shifted = curNodesQueue.shift();
       curNodes = shifted ? tempNodes.concat(shifted) : tempNodes;
     }
-    if (handlerSets[1]) {
-      handlerSets.sort((a2, b2) => {
-        return a2.score - b2.score;
-      });
-    }
+    if (handlerSets[1]) handlerSets.sort((a2, b2) => {
+      return a2.score - b2.score;
+    });
     return [handlerSets.map(({ handler, params }) => [handler, params])];
   }
 };
@@ -27212,11 +27966,9 @@ var Node2 = class _Node2 {
 // node_modules/hono/dist/router/trie-router/router.js
 var TrieRouter = class {
   name = "TrieRouter";
-  #node = new Node2();
+  #node = new Node3();
   add(method, path6, handler) {
-    for (const result of checkOptionalParameter(path6) || [path6]) {
-      this.#node.insert(method, result, handler);
-    }
+    for (const result of checkOptionalParameter(path6) || [path6]) this.#node.insert(method, result, handler);
   }
   match(method, path6) {
     return this.#node.search(method, path6);
@@ -27224,17 +27976,15 @@ var TrieRouter = class {
 };
 
 // node_modules/hono/dist/hono.js
-var Hono2 = class extends Hono {
+var Hono3 = class extends Hono {
   /**
-   * Creates an instance of the Hono class.
-   *
-   * @param options - Optional configuration options for the Hono instance.
-   */
+  * Creates an instance of the Hono class.
+  *
+  * @param options - Optional configuration options for the Hono instance.
+  */
   constructor(options = {}) {
     super(options);
-    this.router = options.router ?? new SmartRouter({
-      routers: [new RegExpRouter(), new TrieRouter()]
-    });
+    this.router = options.router ?? new SmartRouter({ routers: [new RegExpRouter(), new TrieRouter()] });
   }
 };
 
@@ -27242,7 +27992,15 @@ var Hono2 = class extends Hono {
 var cors = (options) => {
   const opts = {
     origin: "*",
-    allowMethods: ["GET", "HEAD", "PUT", "POST", "DELETE", "PATCH", "QUERY"],
+    allowMethods: [
+      "GET",
+      "HEAD",
+      "PUT",
+      "POST",
+      "DELETE",
+      "PATCH",
+      "QUERY"
+    ],
     allowHeaders: [],
     exposeHeaders: [],
     ...options
@@ -27251,58 +28009,35 @@ var cors = (options) => {
   const allowHeadersStr = opts.allowHeaders?.length ? opts.allowHeaders.join(",") : void 0;
   const findAllowOrigin = ((optsOrigin) => {
     if (typeof optsOrigin === "string") {
-      if (optsOrigin === "*") {
-        return () => optsOrigin;
-      } else {
-        return (origin) => optsOrigin === origin ? origin : null;
-      }
-    } else if (typeof optsOrigin === "function") {
-      return optsOrigin;
-    } else {
-      return (origin) => optsOrigin.includes(origin) ? origin : null;
-    }
+      if (optsOrigin === "*") return () => optsOrigin;
+      else return (origin) => optsOrigin === origin ? origin : null;
+    } else if (typeof optsOrigin === "function") return optsOrigin;
+    else return (origin) => optsOrigin.includes(origin) ? origin : null;
   })(opts.origin);
   const findAllowMethods = ((optsAllowMethods) => {
-    if (typeof optsAllowMethods === "function") {
-      return async (origin, c2) => (await optsAllowMethods(origin, c2)).join(",");
-    } else if (Array.isArray(optsAllowMethods)) {
+    if (typeof optsAllowMethods === "function") return async (origin, c2) => (await optsAllowMethods(origin, c2)).join(",");
+    else if (Array.isArray(optsAllowMethods)) {
       const methodsStr = optsAllowMethods.join(",");
       return () => methodsStr;
-    } else {
-      return () => "";
-    }
+    } else return () => "";
   })(opts.allowMethods);
   return async function cors2(c2, next) {
     function set(key, value) {
       c2.res.headers.set(key, value);
     }
     const allowOrigin = await findAllowOrigin(c2.req.header("origin") || "", c2);
-    if (allowOrigin) {
-      set("Access-Control-Allow-Origin", allowOrigin);
-    }
-    if (opts.credentials) {
-      set("Access-Control-Allow-Credentials", "true");
-    }
-    if (exposeHeadersStr) {
-      set("Access-Control-Expose-Headers", exposeHeadersStr);
-    }
+    if (allowOrigin) set("Access-Control-Allow-Origin", allowOrigin);
+    if (opts.credentials) set("Access-Control-Allow-Credentials", "true");
+    if (exposeHeadersStr) set("Access-Control-Expose-Headers", exposeHeadersStr);
     if (c2.req.method === "OPTIONS") {
-      if (opts.origin !== "*") {
-        c2.res.headers.append("Vary", "Origin");
-      }
-      if (opts.maxAge != null) {
-        set("Access-Control-Max-Age", opts.maxAge.toString());
-      }
+      if (opts.origin !== "*") c2.res.headers.append("Vary", "Origin");
+      if (opts.maxAge != null) set("Access-Control-Max-Age", opts.maxAge.toString());
       const allowMethods = await findAllowMethods(c2.req.header("origin") || "", c2);
-      if (allowMethods) {
-        set("Access-Control-Allow-Methods", allowMethods);
-      }
+      if (allowMethods) set("Access-Control-Allow-Methods", allowMethods);
       let headersStr = allowHeadersStr;
       if (!headersStr) {
         const requestHeaders = c2.req.header("Access-Control-Request-Headers");
-        if (requestHeaders) {
-          headersStr = requestHeaders.split(",").map((h2) => h2.trim()).join(",");
-        }
+        if (requestHeaders) headersStr = requestHeaders.split(",").map((h2) => h2.trim()).join(",");
       }
       if (headersStr) {
         set("Access-Control-Allow-Headers", headersStr);
@@ -27317,66 +28052,54 @@ var cors = (options) => {
       });
     }
     await next();
-    if (opts.origin !== "*") {
-      c2.header("Vary", "Origin", { append: true });
-    }
+    if (opts.origin !== "*") c2.header("Vary", "Origin", { append: true });
   };
 };
 
 // node_modules/hono/dist/utils/color.js
 function getColorEnabled() {
   const { process: process3, Deno: Deno2 } = globalThis;
-  const isNoColor = typeof Deno2?.noColor === "boolean" ? Deno2.noColor : process3 !== void 0 ? (
-    // eslint-disable-next-line no-unsafe-optional-chaining
-    "NO_COLOR" in process3?.env
-  ) : false;
-  return !isNoColor;
+  return !(typeof Deno2?.noColor === "boolean" ? Deno2.noColor : process3 !== void 0 ? "NO_COLOR" in process3?.env : false);
 }
 async function getColorEnabledAsync() {
   const { navigator } = globalThis;
   const cfWorkers = "cloudflare:workers";
-  const isNoColor = navigator !== void 0 && navigator.userAgent === "Cloudflare-Workers" ? await (async () => {
+  return !(navigator !== void 0 && navigator.userAgent === "Cloudflare-Workers" ? await (async () => {
     try {
       return "NO_COLOR" in ((await import(cfWorkers)).env ?? {});
     } catch {
       return false;
     }
-  })() : !getColorEnabled();
-  return !isNoColor;
+  })() : !getColorEnabled());
 }
 
 // node_modules/hono/dist/middleware/logger/index.js
 var humanize = (times) => {
   const [delimiter2, separator] = [",", "."];
-  const orderTimes = times.map((v2) => v2.replace(/(\d)(?=(\d\d\d)+(?!\d))/g, "$1" + delimiter2));
-  return orderTimes.join(separator);
+  return times.map((v2) => v2.replace(/(\d)(?=(\d\d\d)+(?!\d))/g, "$1" + delimiter2)).join(separator);
 };
 var time = (start) => {
   const delta = Date.now() - start;
   return humanize([delta < 1e3 ? delta + "ms" : Math.round(delta / 1e3) + "s"]);
 };
 var colorStatus = async (status) => {
-  const colorEnabled = await getColorEnabledAsync();
-  if (colorEnabled) {
-    switch (status / 100 | 0) {
-      case 5:
-        return `\x1B[31m${status}\x1B[0m`;
-      case 4:
-        return `\x1B[33m${status}\x1B[0m`;
-      case 3:
-        return `\x1B[36m${status}\x1B[0m`;
-      case 2:
-        return `\x1B[32m${status}\x1B[0m`;
-    }
+  if (await getColorEnabledAsync()) switch (status / 100 | 0) {
+    case 5:
+      return `\x1B[31m${status}\x1B[0m`;
+    case 4:
+      return `\x1B[33m${status}\x1B[0m`;
+    case 3:
+      return `\x1B[36m${status}\x1B[0m`;
+    case 2:
+      return `\x1B[32m${status}\x1B[0m`;
   }
   return `${status}`;
 };
 async function log(fn2, prefix, method, path6, status = 0, elapsed) {
-  const out = prefix === "<--" ? `${prefix} ${method} ${path6}` : `${prefix} ${method} ${path6} ${await colorStatus(status)} ${elapsed}`;
-  fn2(out);
+  fn2(prefix === "<--" ? `${prefix} ${method} ${path6}` : `${prefix} ${method} ${path6} ${await colorStatus(status)} ${elapsed}`);
 }
 var logger = (fn2 = console.log) => {
-  return async function logger22(c2, next) {
+  return async function logger3(c2, next) {
     const { method, url } = c2.req;
     const path6 = url.slice(url.indexOf("/", 8));
     await log(fn2, "<--", method, path6);
@@ -27421,48 +28144,30 @@ var DEFAULT_OPTIONS = {
   permissionsPolicy: {}
 };
 var secureHeaders = (customOptions) => {
-  const options = { ...DEFAULT_OPTIONS, ...customOptions };
+  const options = {
+    ...DEFAULT_OPTIONS,
+    ...customOptions
+  };
   const headersToSet = getFilteredHeaders(options);
   const callbacks = [];
   if (options.contentSecurityPolicy) {
-    const [callback, value] = getCSPDirectives(
-      options.contentSecurityPolicy,
-      "Content-Security-Policy"
-    );
-    if (callback) {
-      callbacks.push(callback);
-    }
+    const [callback, value] = getCSPDirectives(options.contentSecurityPolicy, "Content-Security-Policy");
+    if (callback) callbacks.push(callback);
     headersToSet.push(["Content-Security-Policy", value]);
   }
   if (options.contentSecurityPolicyReportOnly) {
-    const [callback, value] = getCSPDirectives(
-      options.contentSecurityPolicyReportOnly,
-      "Content-Security-Policy-Report-Only"
-    );
-    if (callback) {
-      callbacks.push(callback);
-    }
+    const [callback, value] = getCSPDirectives(options.contentSecurityPolicyReportOnly, "Content-Security-Policy-Report-Only");
+    if (callback) callbacks.push(callback);
     headersToSet.push(["Content-Security-Policy-Report-Only", value]);
   }
-  if (options.permissionsPolicy && Object.keys(options.permissionsPolicy).length > 0) {
-    headersToSet.push([
-      "Permissions-Policy",
-      getPermissionsPolicyDirectives(options.permissionsPolicy)
-    ]);
-  }
-  if (options.reportingEndpoints) {
-    headersToSet.push(["Reporting-Endpoints", getReportingEndpoints(options.reportingEndpoints)]);
-  }
-  if (options.reportTo) {
-    headersToSet.push(["Report-To", getReportToOptions(options.reportTo)]);
-  }
+  if (options.permissionsPolicy && Object.keys(options.permissionsPolicy).length > 0) headersToSet.push(["Permissions-Policy", getPermissionsPolicyDirectives(options.permissionsPolicy)]);
+  if (options.reportingEndpoints) headersToSet.push(["Reporting-Endpoints", getReportingEndpoints(options.reportingEndpoints)]);
+  if (options.reportTo) headersToSet.push(["Report-To", getReportToOptions(options.reportTo)]);
   return async function secureHeaders2(ctx, next) {
     const headersToSetForReq = callbacks.length === 0 ? headersToSet : callbacks.reduce((acc, cb) => cb(ctx, acc), headersToSet);
     await next();
     setHeaders(ctx, headersToSetForReq);
-    if (options?.removePoweredBy) {
-      ctx.res.headers.delete("X-Powered-By");
-    }
+    if (options?.removePoweredBy) ctx.res.headers.delete("X-Powered-By");
   };
 };
 function getFilteredHeaders(options) {
@@ -27484,49 +28189,28 @@ function getCSPDirectives(contentSecurityPolicy, headerName) {
         });
       }
     });
-    resultValues.push(
-      directive.replace(
-        /[A-Z]+(?![a-z])|[A-Z]/g,
-        (match2, offset) => offset ? "-" + match2.toLowerCase() : match2.toLowerCase()
-      ),
-      ...valueArray.flatMap((value2) => [" ", value2]),
-      "; "
-    );
+    resultValues.push(directive.replace(/[A-Z]+(?![a-z])|[A-Z]/g, (match2, offset) => offset ? "-" + match2.toLowerCase() : match2.toLowerCase()), ...valueArray.flatMap((value2) => [" ", value2]), "; ");
   }
   resultValues.pop();
-  return callbacks.length === 0 ? [void 0, resultValues.join("")] : [
-    (ctx, headersToSet) => headersToSet.map((values) => {
-      if (values[0] === headerName) {
-        const clone = values[1].slice();
-        callbacks.forEach((cb) => {
-          cb(ctx, clone);
-        });
-        return [values[0], clone.join("")];
-      } else {
-        return values;
-      }
-    }),
-    resultValues
-  ];
+  return callbacks.length === 0 ? [void 0, resultValues.join("")] : [(ctx, headersToSet) => headersToSet.map((values) => {
+    if (values[0] === headerName) {
+      const clone = values[1].slice();
+      callbacks.forEach((cb) => {
+        cb(ctx, clone);
+      });
+      return [values[0], clone.join("")];
+    } else return values;
+  }), resultValues];
 }
 function getPermissionsPolicyDirectives(policy) {
   return Object.entries(policy).map(([directive, value]) => {
     const kebabDirective = camelToKebab(directive);
-    if (typeof value === "boolean") {
-      return `${kebabDirective}=${value ? "*" : "()"}`;
-    }
+    if (typeof value === "boolean") return `${kebabDirective}=${value ? "*" : "()"}`;
     if (Array.isArray(value)) {
-      if (value.length === 0) {
-        return `${kebabDirective}=()`;
-      }
-      if (value.length === 1 && value[0] === "*") {
-        return `${kebabDirective}=*`;
-      }
-      if (value.length === 1 && value[0] === "none") {
-        return `${kebabDirective}=()`;
-      }
-      const allowlist = value.map((item) => ["self", "src"].includes(item) ? item : `"${item}"`);
-      return `${kebabDirective}=(${allowlist.join(" ")})`;
+      if (value.length === 0) return `${kebabDirective}=()`;
+      if (value.length === 1 && value[0] === "*") return `${kebabDirective}=*`;
+      if (value.length === 1 && value[0] === "none") return `${kebabDirective}=()`;
+      return `${kebabDirective}=(${value.map((item) => ["self", "src"].includes(item) ? item : `"${item}"`).join(" ")})`;
     }
     return "";
   }).filter(Boolean).join(", ");
@@ -27692,110 +28376,65 @@ var trimCookieWhitespace = (value) => {
   let end = value.length;
   while (start < end) {
     const charCode = value.charCodeAt(start);
-    if (charCode !== 32 && charCode !== 9) {
-      break;
-    }
+    if (charCode !== 32 && charCode !== 9) break;
     start++;
   }
   while (end > start) {
     const charCode = value.charCodeAt(end - 1);
-    if (charCode !== 32 && charCode !== 9) {
-      break;
-    }
+    if (charCode !== 32 && charCode !== 9) break;
     end--;
   }
   return start === 0 && end === value.length ? value : value.slice(start, end);
 };
 var parse = (cookie, name2) => {
-  if (name2 && cookie.indexOf(name2) === -1) {
-    return {};
-  }
+  if (name2 && cookie.indexOf(name2) === -1) return {};
   const pairs = cookie.split(";");
   const parsedCookie = /* @__PURE__ */ Object.create(null);
   for (const pairStr of pairs) {
     const valueStartPos = pairStr.indexOf("=");
-    if (valueStartPos === -1) {
-      continue;
-    }
+    if (valueStartPos === -1) continue;
     const cookieName = trimCookieWhitespace(pairStr.substring(0, valueStartPos));
-    if (name2 && name2 !== cookieName || !relaxedCookieNameRegEx.test(cookieName) || cookieName in parsedCookie) {
-      continue;
-    }
+    if (name2 && name2 !== cookieName || !relaxedCookieNameRegEx.test(cookieName) || cookieName in parsedCookie) continue;
     let cookieValue = trimCookieWhitespace(pairStr.substring(valueStartPos + 1));
-    if (cookieValue.startsWith('"') && cookieValue.endsWith('"')) {
-      cookieValue = cookieValue.slice(1, -1);
-    }
+    if (cookieValue.startsWith('"') && cookieValue.endsWith('"')) cookieValue = cookieValue.slice(1, -1);
     if (validCookieValueRegEx.test(cookieValue)) {
       parsedCookie[cookieName] = tryDecodeURIComponent(cookieValue);
-      if (name2) {
-        break;
-      }
+      if (name2) break;
     }
   }
   return parsedCookie;
 };
 var _serialize = (name2, value, opt = {}) => {
-  if (!validCookieNameRegEx.test(name2)) {
-    throw new Error("Invalid cookie name");
-  }
+  if (!validCookieNameRegEx.test(name2)) throw new Error("Invalid cookie name");
   let cookie = `${name2}=${value}`;
-  if (name2.startsWith("__Secure-") && !opt.secure) {
-    throw new Error("__Secure- Cookie must have Secure attributes");
-  }
+  if (name2.startsWith("__Secure-") && !opt.secure) throw new Error("__Secure- Cookie must have Secure attributes");
   if (name2.startsWith("__Host-")) {
-    if (!opt.secure) {
-      throw new Error("__Host- Cookie must have Secure attributes");
-    }
-    if (opt.path !== "/") {
-      throw new Error('__Host- Cookie must have Path attributes with "/"');
-    }
-    if (opt.domain) {
-      throw new Error("__Host- Cookie must not have Domain attributes");
-    }
+    if (!opt.secure) throw new Error("__Host- Cookie must have Secure attributes");
+    if (opt.path !== "/") throw new Error('__Host- Cookie must have Path attributes with "/"');
+    if (opt.domain) throw new Error("__Host- Cookie must not have Domain attributes");
   }
-  for (const key of ["domain", "path", "sameSite", "priority"]) {
-    if (opt[key] && /[;\r\n]/.test(opt[key])) {
-      throw new Error(`${key} must not contain ";", "\\r", or "\\n"`);
-    }
-  }
+  for (const key of [
+    "domain",
+    "path",
+    "sameSite",
+    "priority"
+  ]) if (opt[key] && /[;\r\n]/.test(opt[key])) throw new Error(`${key} must not contain ";", "\\r", or "\\n"`);
   if (opt && typeof opt.maxAge === "number" && opt.maxAge >= 0) {
-    if (opt.maxAge > 3456e4) {
-      throw new Error(
-        "Cookies Max-Age SHOULD NOT be greater than 400 days (34560000 seconds) in duration."
-      );
-    }
+    if (opt.maxAge > 3456e4) throw new Error("Cookies Max-Age SHOULD NOT be greater than 400 days (34560000 seconds) in duration.");
     cookie += `; Max-Age=${opt.maxAge | 0}`;
   }
-  if (opt.domain && opt.prefix !== "host") {
-    cookie += `; Domain=${opt.domain}`;
-  }
-  if (opt.path) {
-    cookie += `; Path=${opt.path}`;
-  }
+  if (opt.domain && opt.prefix !== "host") cookie += `; Domain=${opt.domain}`;
+  if (opt.path) cookie += `; Path=${opt.path}`;
   if (opt.expires) {
-    if (opt.expires.getTime() - Date.now() > 3456e7) {
-      throw new Error(
-        "Cookies Expires SHOULD NOT be greater than 400 days (34560000 seconds) in the future."
-      );
-    }
+    if (opt.expires.getTime() - Date.now() > 3456e7) throw new Error("Cookies Expires SHOULD NOT be greater than 400 days (34560000 seconds) in the future.");
     cookie += `; Expires=${opt.expires.toUTCString()}`;
   }
-  if (opt.httpOnly) {
-    cookie += "; HttpOnly";
-  }
-  if (opt.secure) {
-    cookie += "; Secure";
-  }
-  if (opt.sameSite) {
-    cookie += `; SameSite=${opt.sameSite.charAt(0).toUpperCase() + opt.sameSite.slice(1)}`;
-  }
-  if (opt.priority) {
-    cookie += `; Priority=${opt.priority.charAt(0).toUpperCase() + opt.priority.slice(1)}`;
-  }
+  if (opt.httpOnly) cookie += "; HttpOnly";
+  if (opt.secure) cookie += "; Secure";
+  if (opt.sameSite) cookie += `; SameSite=${opt.sameSite.charAt(0).toUpperCase() + opt.sameSite.slice(1)}`;
+  if (opt.priority) cookie += `; Priority=${opt.priority.charAt(0).toUpperCase() + opt.priority.slice(1)}`;
   if (opt.partitioned) {
-    if (!opt.secure) {
-      throw new Error("Partitioned Cookie must have Secure attributes");
-    }
+    if (!opt.secure) throw new Error("Partitioned Cookie must have Secure attributes");
     cookie += "; Partitioned";
   }
   return cookie;
@@ -27809,38 +28448,32 @@ var serialize = (name2, value, opt) => {
 var getCookie = (c2, key, prefix) => {
   const cookie = c2.req.raw.headers.get("Cookie");
   if (typeof key === "string") {
-    if (!cookie) {
-      return void 0;
-    }
+    if (!cookie) return;
     let finalKey = key;
-    if (prefix === "secure") {
-      finalKey = "__Secure-" + key;
-    } else if (prefix === "host") {
-      finalKey = "__Host-" + key;
-    }
-    const obj2 = parse(cookie, finalKey);
-    return obj2[finalKey];
+    if (prefix === "secure") finalKey = "__Secure-" + key;
+    else if (prefix === "host") finalKey = "__Host-" + key;
+    return parse(cookie, finalKey)[finalKey];
   }
-  if (!cookie) {
-    return {};
-  }
-  const obj = parse(cookie);
-  return obj;
+  if (!cookie) return {};
+  return parse(cookie);
 };
 var generateCookie = (name2, value, opt) => {
   let cookie;
-  if (opt?.prefix === "secure") {
-    cookie = serialize("__Secure-" + name2, value, { path: "/", ...opt, secure: true });
-  } else if (opt?.prefix === "host") {
-    cookie = serialize("__Host-" + name2, value, {
-      ...opt,
-      path: "/",
-      secure: true,
-      domain: void 0
-    });
-  } else {
-    cookie = serialize(name2, value, { path: "/", ...opt });
-  }
+  if (opt?.prefix === "secure") cookie = serialize("__Secure-" + name2, value, {
+    path: "/",
+    ...opt,
+    secure: true
+  });
+  else if (opt?.prefix === "host") cookie = serialize("__Host-" + name2, value, {
+    ...opt,
+    path: "/",
+    secure: true,
+    domain: void 0
+  });
+  else cookie = serialize(name2, value, {
+    path: "/",
+    ...opt
+  });
   return cookie;
 };
 var setCookie = (c2, name2, value, opt) => {
@@ -27849,7 +28482,10 @@ var setCookie = (c2, name2, value, opt) => {
 };
 var deleteCookie = (c2, name2, opt) => {
   const deletedCookie = getCookie(c2, name2, opt?.prefix);
-  setCookie(c2, name2, "", { ...opt, maxAge: 0 });
+  setCookie(c2, name2, "", {
+    ...opt,
+    maxAge: 0
+  });
   return deletedCookie;
 };
 
@@ -51808,8 +52444,8 @@ function isFactoryProvider(provider) {
 
 // node_modules/tsyringe/dist/esm5/lazy-helpers.js
 var DelayedConstructor = (function() {
-  function DelayedConstructor2(wrap5) {
-    this.wrap = wrap5;
+  function DelayedConstructor2(wrap4) {
+    this.wrap = wrap4;
     this.reflectMethods = [
       "get",
       "getPrototypeOf",
@@ -63281,8 +63917,8 @@ var sizeOfOffset2 = 32;
 function decodeAddress3(cursor, options = {}) {
   const { checksum: checksum3 = false } = options;
   const value = cursor.readBytes(32);
-  const wrap5 = (address) => checksum3 ? checksum2(address) : address;
-  return [wrap5(fromBytes(slice2(value, -20))), 32];
+  const wrap4 = (address) => checksum3 ? checksum2(address) : address;
+  return [wrap4(fromBytes(slice2(value, -20))), 32];
 }
 function decodeArray3(cursor, param, options) {
   const { checksumAddress: checksumAddress2, length, staticPosition } = options;
@@ -66689,7 +67325,7 @@ var Web3WalletAuthService = class {
 // src/features/auth/authRoutes.ts
 init_logger();
 init_request();
-var auth = new Hono2();
+var auth = new Hono3();
 var isSecureContext = (c2) => c2.env.ENVIRONMENT !== "development";
 var getService = (c2) => new AuthService(c2.env);
 var getWebAuthnService = (c2) => new WebAuthnService(c2.env, getRealRequestUrl(c2), c2.req.header());
@@ -68701,7 +69337,7 @@ var ByosSyncService = class {
 };
 
 // src/features/vault/vaultRoutes.ts
-var vault5 = new Hono2();
+var vault5 = new Hono3();
 var getService2 = (c2) => {
   const repo = new VaultRepository(c2.env.DB);
   return new VaultService(c2.env, repo);
@@ -79460,7 +80096,7 @@ var BackupService = class {
 // src/features/backup/backupRoutes.ts
 init_crypto();
 init_logger();
-var backups = new Hono2();
+var backups = new Hono3();
 var isSecureContext2 = (c2) => c2.env.ENVIRONMENT !== "development";
 backups.get("/oauth/google/callback", async (c2) => {
   c2.header("Cross-Origin-Opener-Policy", "unsafe-none");
@@ -80263,7 +80899,7 @@ async function handleScheduledBackup(env) {
 var backupRoutes_default = backups;
 
 // src/features/telegram/telegramRoutes.ts
-var telegram = new Hono2();
+var telegram = new Hono3();
 telegram.post("/webhook", async (c2) => {
   const token = c2.env.OAUTH_TELEGRAM_BOT_TOKEN;
   if (!token) return c2.text("Bot Token not configured", 500);
@@ -80319,7 +80955,7 @@ async function sendTelegramMessage(token, chatId, text4, replyMarkup) {
 var telegramRoutes_default = telegram;
 
 // src/features/tools/toolsRoutes.ts
-var tools = new Hono2();
+var tools = new Hono3();
 tools.use("/*", authMiddleware);
 tools.get("/server-time", (c2) => {
   return c2.json({ success: true, time: Date.now() });
@@ -80341,11 +80977,36 @@ var validateLicense = async (license, currentHost) => {
     const clean2 = license.replace(/[^a-zA-Z0-9+/=]/g, "");
     const decoded = atob(clean2);
     const parts = decoded.split("|");
-    if (parts.length !== 3) {
-      console.error(`\u{1F6D1} [validateLicense]: parts.length = ${parts.length}, decoded sample = ${decoded.substring(0, 30)}...`);
+    let domain;
+    let expiry;
+    let signatureBase64;
+    let dataToSign;
+    if (parts.length >= 5) {
+      const product = parts[0];
+      domain = parts[1];
+      const tier = parts[2];
+      expiry = parts[3];
+      signatureBase64 = parts[parts.length - 1];
+      if (product !== "nodeauth") {
+        console.error(`\u{1F6D1} [validateLicense]: product mismatch! expected 'nodeauth', got '${product}'`);
+        return { success: false, message: "license_product_mismatch" };
+      }
+      dataToSign = `${product}|${domain}|${tier}|${expiry}`;
+    } else if (parts.length === 4) {
+      domain = parts[0];
+      const tier = parts[1];
+      expiry = parts[2];
+      signatureBase64 = parts[3];
+      dataToSign = `${domain}|${tier}|${expiry}`;
+    } else if (parts.length === 3) {
+      domain = parts[0];
+      expiry = parts[1];
+      signatureBase64 = parts[2];
+      dataToSign = `${domain}|${expiry}`;
+    } else {
+      console.error(`\u{1F6D1} [validateLicense]: invalid parts count = ${parts.length}, decoded sample = ${decoded.substring(0, 30)}...`);
       return { success: false, message: "license_invalid_format" };
     }
-    const [domain, expiry, signatureBase64] = parts;
     const normDomain = normalizeDomain2(domain);
     const normHost = normalizeDomain2(currentHost);
     if (normDomain !== normHost) {
@@ -80362,7 +81023,7 @@ var validateLicense = async (license, currentHost) => {
     }
     const PUBLIC_KEY_HEX = "7c3dfb50523e20b2d7df136631f1a46d5b21cf4fde0824bd6dcdfbdd00ea0a8c";
     const sigBytes = Uint8Array.from(atob(signatureBase64), (c2) => c2.charCodeAt(0));
-    const dataBytes = new TextEncoder().encode(`${domain}|${expiry}`);
+    const dataBytes = new TextEncoder().encode(dataToSign);
     try {
       const publicKey = await crypto.subtle.importKey(
         "raw",
@@ -80637,7 +81298,7 @@ var runHealthCheck = async (env, requestUrl) => {
 };
 
 // src/features/health/healthRoutes.ts
-var health = new Hono2();
+var health = new Hono3();
 health.get("/health-check", async (c2) => {
   c2.header("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
   c2.header("Pragma", "no-cache");
@@ -80653,7 +81314,7 @@ var healthRoutes_default = health;
 
 // src/features/emergency/emergencyRoutes.ts
 init_request();
-var emergency = new Hono2();
+var emergency = new Hono3();
 emergency.post("/confirm", authMiddleware, rateLimit({
   windowMs: SECURITY_CONFIG.LOCKOUT_TIME,
   max: SECURITY_CONFIG.MAX_LOGIN_ATTEMPTS
@@ -80675,7 +81336,7 @@ emergency.post("/confirm", authMiddleware, rateLimit({
 var emergencyRoutes_default = emergency;
 
 // src/features/auth/wcProxyRoutes.ts
-var wcProxy = new Hono2();
+var wcProxy = new Hono3();
 var proxyRequest = async (targetHost, targetPath, c2) => {
   const url = new URL(c2.req.url);
   url.hostname = targetHost;
@@ -80740,7 +81401,7 @@ wcProxy.all("/explorer/*", (c2) => {
 var wcProxyRoutes_default = wcProxy;
 
 // src/app/index.ts
-var app = new Hono2();
+var app = new Hono3();
 app.use("*", async (c2, next) => {
   if (c2.env) {
     await initializeEnv(c2.env);
@@ -85510,14 +86171,14 @@ var HttpStream = class extends Stream2 {
     if (firstEntry === void 0) {
       return;
     } else if (firstEntry.type === "pipeline") {
-      const pipeline = [firstEntry];
+      const pipeline3 = [firstEntry];
       for (; ; ) {
         const entry = this.#queue.first();
         if (entry !== void 0 && entry.type === "pipeline") {
-          pipeline.push(entry);
+          pipeline3.push(entry);
           this.#queue.shift();
         } else if (entry === void 0 && this.#closing && !this.#closeQueued) {
-          pipeline.push({
+          pipeline3.push({
             type: "pipeline",
             request: { type: "close" },
             responseCallback: () => void 0,
@@ -85529,15 +86190,15 @@ var HttpStream = class extends Stream2 {
           break;
         }
       }
-      this.#flushPipeline(endpoint, pipeline);
+      this.#flushPipeline(endpoint, pipeline3);
     } else if (firstEntry.type === "cursor") {
       this.#flushCursor(endpoint, firstEntry);
     } else {
       throw impossible(firstEntry, "Impossible type of QueueEntry");
     }
   }
-  #flushPipeline(endpoint, pipeline) {
-    this.#flush(() => this.#createPipelineRequest(pipeline, endpoint), (resp) => decodePipelineResponse(resp, endpoint.encoding), (respBody) => respBody.baton, (respBody) => respBody.baseUrl, (respBody) => handlePipelineResponse(pipeline, respBody), (error2) => pipeline.forEach((entry) => entry.errorCallback(error2)));
+  #flushPipeline(endpoint, pipeline3) {
+    this.#flush(() => this.#createPipelineRequest(pipeline3, endpoint), (resp) => decodePipelineResponse(resp, endpoint.encoding), (respBody) => respBody.baton, (respBody) => respBody.baseUrl, (respBody) => handlePipelineResponse(pipeline3, respBody), (error2) => pipeline3.forEach((entry) => entry.errorCallback(error2)));
   }
   #flushCursor(endpoint, entry) {
     const cursor = new HttpCursor(this, endpoint.encoding);
@@ -85573,10 +86234,10 @@ var HttpStream = class extends Stream2 {
       this.#flushQueue();
     });
   }
-  #createPipelineRequest(pipeline, endpoint) {
+  #createPipelineRequest(pipeline3, endpoint) {
     return this.#createRequest(new URL(endpoint.pipelinePath, this.#baseUrl), {
       baton: this.#baton,
-      requests: pipeline.map((entry) => entry.request)
+      requests: pipeline3.map((entry) => entry.request)
     }, endpoint.encoding, PipelineReqBody, PipelineReqBody2);
   }
   #createCursorRequest(entry, endpoint) {
@@ -85611,13 +86272,13 @@ var HttpStream = class extends Stream2 {
     return new Request(url.toString(), { method: "POST", headers, body: bodyData });
   }
 };
-function handlePipelineResponse(pipeline, respBody) {
-  if (respBody.results.length !== pipeline.length) {
+function handlePipelineResponse(pipeline3, respBody) {
+  if (respBody.results.length !== pipeline3.length) {
     throw new ProtoError("Server returned unexpected number of pipeline results");
   }
-  for (let i2 = 0; i2 < pipeline.length; ++i2) {
+  for (let i2 = 0; i2 < pipeline3.length; ++i2) {
     const result = respBody.results[i2];
-    const entry = pipeline[i2];
+    const entry = pipeline3[i2];
     if (result.type === "ok") {
       if (result.response.type !== entry.request.type) {
         throw new ProtoError("Received unexpected type of response");
